@@ -3,21 +3,27 @@ import subprocess
 import yaml
 import os
 import sys
+import time
 from typing import Dict, Any, List, Optional
 from tools import discover_tools
 
 
 class ClaudeCodeCLIAgent:
     def __init__(self, config_path="config.yaml", silent=False):
+        init_start = time.time()
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
         # Silent mode for orchestrator (suppresses debug output)
         self.silent = silent
+        self.timing_enabled = os.environ.get('TIMING_DEBUG', 'false').lower() == 'true'
         
         # Discover tools dynamically (for compatibility check)
+        tool_start = time.time()
         self.discovered_tools = discover_tools(self.config, silent=self.silent)
+        if self.timing_enabled:
+            print(f"⏱️  Tool discovery took: {time.time() - tool_start:.2f}s")
         
         # Build tool mapping (kept for interface compatibility)
         self.tool_mapping = {name: tool.execute for name, tool in self.discovered_tools.items()}
@@ -35,13 +41,21 @@ class ClaudeCodeCLIAgent:
         self.base_system_prompt = self.config.get('system_prompt', '')
         
         # Build enhanced system prompt with tool instructions
+        prompt_start = time.time()
         self.system_prompt = self._build_enhanced_system_prompt()
+        if self.timing_enabled:
+            print(f"⏱️  System prompt building took: {time.time() - prompt_start:.2f}s")
+            print(f"⏱️  System prompt size: {len(self.system_prompt)} chars")
         
         # Get CLI path (default to 'claude' if not specified)
         self.cli_path = self.claude_config.get('cli_path', 'claude')
         
         # Verify Claude CLI is installed
+        verify_start = time.time()
         self._verify_cli_installed()
+        if self.timing_enabled:
+            print(f"⏱️  CLI verification took: {time.time() - verify_start:.2f}s")
+            print(f"⏱️  Total init time: {time.time() - init_start:.2f}s")
         
         # Debug: Print system prompt preview only in debug mode
         if os.environ.get('DEBUG_CLAUDE_CLI'):
@@ -143,6 +157,8 @@ class ClaudeCodeCLIAgent:
         task_completed = False
         iteration_count = 0
         total_cost = 0.0
+        parse_start = time.time()
+        last_update = time.time()
         
         try:
             for line in process.stdout:
@@ -165,8 +181,14 @@ class ClaudeCodeCLIAgent:
                         
                         # Count iterations
                         iteration_count += 1
+                        current_time = time.time()
                         if not self.silent:
-                            print(f"🔄 Claude Code turn {iteration_count}/{self.max_iterations}")
+                            elapsed = current_time - parse_start
+                            print(f"🔄 Claude Code turn {iteration_count}/{self.max_iterations} (elapsed: {elapsed:.1f}s)")
+                        
+                        if self.timing_enabled and current_time - last_update > 5:
+                            print(f"⏱️  Still processing... {current_time - parse_start:.1f}s elapsed")
+                            last_update = current_time
                         
                         # Process content blocks
                         for content_block in assistant_msg.get('content', []):
@@ -234,8 +256,11 @@ class ClaudeCodeCLIAgent:
     
     def run(self, user_input: str) -> str:
         """Run the agent with user input and return FULL conversation content"""
+        run_start = time.time()
         if not self.silent:
             print(f"🤖 Using Claude Code CLI provider")
+            if self.timing_enabled:
+                print(f"⏱️  Input: {user_input[:50]}..." if len(user_input) > 50 else f"⏱️  Input: {user_input}")
         
         # Build command
         cmd = [
@@ -257,6 +282,10 @@ class ClaudeCodeCLIAgent:
         
         try:
             # Run subprocess
+            if self.timing_enabled:
+                print(f"⏱️  Starting Claude CLI subprocess...")
+            subprocess_start = time.time()
+            
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -265,11 +294,18 @@ class ClaudeCodeCLIAgent:
                 text=False  # We'll decode manually for better control
             )
             
+            if self.timing_enabled:
+                print(f"⏱️  Subprocess started in {time.time() - subprocess_start:.2f}s")
+            
             # Parse streaming output
             result = self._parse_streaming_json(process)
             
             # Wait for process to complete
             process.wait()
+            
+            total_time = time.time() - run_start
+            if self.timing_enabled:
+                print(f"⏱️  Total execution time: {total_time:.2f}s")
             
             if process.returncode != 0 and not self.silent:
                 print(f"⚠️ Claude Code CLI exited with code: {process.returncode}")

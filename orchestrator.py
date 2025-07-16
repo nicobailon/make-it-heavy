@@ -2,6 +2,7 @@ import json
 import yaml
 import time
 import threading
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 from agent import create_agent
@@ -24,6 +25,10 @@ class TaskOrchestrator:
     
     def decompose_task(self, user_input: str, num_agents: int) -> List[str]:
         """Use AI to dynamically generate different questions based on user input"""
+        if not self.silent:
+            print(f"🧠 Generating {num_agents} specialized questions...")
+        
+        decompose_start = time.time()
         
         # Create question generation agent
         question_agent = create_agent(silent=True)
@@ -50,6 +55,11 @@ class TaskOrchestrator:
             if len(questions) != num_agents:
                 raise ValueError(f"Expected {num_agents} questions, got {len(questions)}")
             
+            if not self.silent:
+                print(f"✅ Generated questions in {time.time() - decompose_start:.1f}s")
+                for i, q in enumerate(questions, 1):
+                    print(f"   Agent {i}: {q[:60]}..." if len(q) > 60 else f"   Agent {i}: {q}")
+            
             return questions
             
         except (json.JSONDecodeError, ValueError) as e:
@@ -74,16 +84,29 @@ class TaskOrchestrator:
         Returns result dictionary with agent_id, status, and response.
         """
         try:
-            self.update_agent_progress(agent_id, "PROCESSING...")
+            self.update_agent_progress(agent_id, "INITIALIZING...")
+            
+            # Show which agent is starting if timing debug is enabled
+            if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
+                print(f"\n🚀 Starting Agent {agent_id + 1} with task: {subtask[:50]}...")
             
             # Use simple agent like in main.py
+            agent_start = time.time()
             agent = create_agent(silent=True)
+            
+            if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
+                print(f"⏱️  Agent {agent_id + 1} initialized in {time.time() - agent_start:.2f}s")
+            
+            self.update_agent_progress(agent_id, "PROCESSING...")
             
             start_time = time.time()
             response = agent.run(subtask)
             execution_time = time.time() - start_time
             
             self.update_agent_progress(agent_id, "COMPLETED", response)
+            
+            if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
+                print(f"✅ Agent {agent_id + 1} completed in {execution_time:.1f}s")
             
             return {
                 "agent_id": agent_id,
@@ -94,6 +117,10 @@ class TaskOrchestrator:
             
         except Exception as e:
             # Simple error handling
+            self.update_agent_progress(agent_id, f"FAILED: {str(e)[:30]}...")
+            if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
+                print(f"❌ Agent {agent_id + 1} failed: {str(e)}")
+            
             return {
                 "agent_id": agent_id,
                 "status": "error",
@@ -172,10 +199,14 @@ class TaskOrchestrator:
         Main orchestration method.
         Takes user input, delegates to parallel agents, and returns aggregated result.
         """
+        orchestrate_start = time.time()
         
         # Reset progress tracking
         self.agent_progress = {}
         self.agent_results = {}
+        
+        if not self.silent:
+            print(f"\n🎯 Orchestrating with {self.num_agents} parallel agents...")
         
         # Decompose task into subtasks
         subtasks = self.decompose_task(user_input, self.num_agents)
@@ -212,6 +243,15 @@ class TaskOrchestrator:
         agent_results.sort(key=lambda x: x["agent_id"])
         
         # Aggregate results
+        if not self.silent:
+            print(f"\n🔀 Synthesizing {len(agent_results)} agent responses...")
+        
+        synthesis_start = time.time()
         final_result = self.aggregate_results(agent_results)
+        
+        total_time = time.time() - orchestrate_start
+        if not self.silent:
+            print(f"✅ Synthesis completed in {time.time() - synthesis_start:.1f}s")
+            print(f"⏱️  Total orchestration time: {total_time:.1f}s")
         
         return final_result

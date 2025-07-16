@@ -1,5 +1,5 @@
 # Provider selection (openrouter or claude_code)
-provider: "openrouter"
+provider: "claude_code"
 
 # Claude Code settings (when provider is "claude_code")
 claude_code:
