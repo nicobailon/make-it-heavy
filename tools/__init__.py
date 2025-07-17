@@ -27,7 +27,16 @@ def _get_config_hash(config: dict) -> str:
     str
         MD5 hash of the sorted JSON representation
     """
-    config_str = json.dumps(config, sort_keys=True)
+    # Only hash tool-relevant config sections to avoid unnecessary cache invalidation
+    if config:
+        tool_relevant_config = {
+            'search': config.get('search', {}),
+            'performance': config.get('performance', {}),
+            # Add other tool-specific configs here as needed
+        }
+        config_str = json.dumps(tool_relevant_config, sort_keys=True)
+    else:
+        config_str = "None"
     return hashlib.md5(config_str.encode()).hexdigest()
 
 
@@ -75,15 +84,19 @@ def discover_tools(config: dict = None, silent: bool = False) -> Dict[str, BaseT
     """
     global _tool_cache, _cache_config_hash
     
-    # Check if caching is enabled
-    if config and config.get('performance', {}).get('cache_tool_discovery', True):
-        current_hash = _get_config_hash(config or {})
+    # Check if caching is enabled (default to True if not specified)
+    cache_enabled = True
+    if config:
+        cache_enabled = config.get('performance', {}).get('cache_tool_discovery', True)
+    
+    if cache_enabled:
+        current_hash = _get_config_hash(config)
         
         # Return cached tools if config hasn't changed
         if _tool_cache is not None and _cache_config_hash == current_hash:
             if not silent:
                 print("Using cached tool discovery")
-            return _tool_cache
+            return _tool_cache.copy()  # Return a copy to prevent external modifications
     
     # If we get here, we need to discover tools
     tools = {}
@@ -120,9 +133,9 @@ def discover_tools(config: dict = None, silent: bool = False) -> Dict[str, BaseT
                     print(f"Warning: Could not load tool from {filename}: {e}")
 
     # Update cache if caching is enabled
-    if config and config.get('performance', {}).get('cache_tool_discovery', True):
-        _tool_cache = tools
-        _cache_config_hash = _get_config_hash(config or {})
+    if cache_enabled:
+        _tool_cache = tools.copy()  # Store a copy
+        _cache_config_hash = _get_config_hash(config)
         if not silent:
             print(f"Cached {len(tools)} tools for future use")
     
