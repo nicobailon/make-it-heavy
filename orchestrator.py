@@ -6,9 +6,37 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any
 from agent import create_agent
+from constants import DEFAULT_MAX_WORKERS, DEFAULT_TASK_TIMEOUT
 
 class TaskOrchestrator:
+    """Orchestrates multiple agents to analyze tasks from different perspectives.
+    
+    The orchestrator decomposes user queries into specialized sub-questions,
+    runs multiple agents in parallel to answer them, and synthesizes the
+    results into a comprehensive response.
+    
+    Attributes:
+        config (dict): Configuration loaded from YAML
+        num_agents (int): Number of parallel agents to run
+        task_timeout (int): Timeout per agent in seconds
+        agent_factory (callable): Factory function to create agents
+        agent_progress (dict): Real-time progress tracking per agent
+        agent_results (dict): Results storage per agent
+    """
+    
     def __init__(self, config_path="config.yaml", silent=False, agent_factory=None):
+        """Initialize the task orchestrator.
+        
+        Parameters
+        ----------
+        config_path : str, optional
+            Path to configuration YAML file (default: "config.yaml")
+        silent : bool, optional
+            Whether to suppress progress output (default: False)
+        agent_factory : callable, optional
+            Factory function to create agents. If None, uses create_agent.
+            Useful for dependency injection in tests.
+        """
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -25,7 +53,27 @@ class TaskOrchestrator:
         self.progress_lock = threading.Lock()
     
     def decompose_task(self, user_input: str, num_agents: int) -> List[str]:
-        """Use AI to dynamically generate different questions based on user input"""
+        """Use AI to dynamically generate different questions based on user input.
+        
+        Creates specialized sub-questions that approach the topic from different
+        angles (research, analysis, verification, alternatives, etc.).
+        
+        Parameters
+        ----------
+        user_input : str
+            The original user query
+        num_agents : int
+            Number of questions to generate
+            
+        Returns
+        -------
+        List[str]
+            List of generated questions, one per agent
+            
+        Notes
+        -----
+        Falls back to simple question variations if AI generation fails.
+        """
         if not self.silent:
             print(f"🧠 Generating {num_agents} specialized questions...")
         
@@ -80,9 +128,26 @@ class TaskOrchestrator:
                 self.agent_results[agent_id] = result
     
     def run_agent_parallel(self, agent_id: int, subtask: str) -> Dict[str, Any]:
-        """
-        Run a single agent with the given subtask.
-        Returns result dictionary with agent_id, status, and response.
+        """Run a single agent with the given subtask.
+        
+        This method is designed to be called in parallel by ThreadPoolExecutor.
+        It tracks progress and handles errors gracefully.
+        
+        Parameters
+        ----------
+        agent_id : int
+            Unique identifier for this agent (0-based)
+        subtask : str
+            The specific question/task for this agent
+            
+        Returns
+        -------
+        dict
+            Result dictionary containing:
+            - agent_id: The agent identifier
+            - status: "success" or "error"
+            - response: The agent's response or error message
+            - execution_time: Time taken in seconds
         """
         try:
             self.update_agent_progress(agent_id, "INITIALIZING...")
@@ -130,9 +195,20 @@ class TaskOrchestrator:
             }
     
     def aggregate_results(self, agent_results: List[Dict[str, Any]]) -> str:
-        """
-        Combine results from all agents into a comprehensive final answer.
-        Uses the configured aggregation strategy.
+        """Combine results from all agents into a comprehensive final answer.
+        
+        Uses AI synthesis to intelligently combine multiple perspectives into
+        a coherent response. Falls back to concatenation if synthesis fails.
+        
+        Parameters
+        ----------
+        agent_results : List[dict]
+            Results from all agents, including failed ones
+            
+        Returns
+        -------
+        str
+            Synthesized final answer combining all successful responses
         """
         successful_results = [r for r in agent_results if r["status"] == "success"]
         
@@ -195,10 +271,28 @@ class TaskOrchestrator:
         with self.progress_lock:
             return self.agent_progress.copy()
     
-    def orchestrate(self, user_input: str):
-        """
-        Main orchestration method.
-        Takes user input, delegates to parallel agents, and returns aggregated result.
+    def orchestrate(self, user_input: str) -> str:
+        """Main orchestration method for multi-agent analysis.
+        
+        Coordinates the entire process: decomposition, parallel execution,
+        and synthesis.
+        
+        Parameters
+        ----------
+        user_input : str
+            The user's query or request
+            
+        Returns
+        -------
+        str
+            Comprehensive answer synthesized from all agents
+            
+        Examples
+        --------
+        >>> orchestrator = TaskOrchestrator(silent=True)
+        >>> result = orchestrator.orchestrate("Explain quantum computing")
+        >>> print(result)
+        "Quantum computing is... [comprehensive multi-perspective answer]"
         """
         orchestrate_start = time.time()
         

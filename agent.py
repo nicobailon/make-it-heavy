@@ -2,10 +2,40 @@ import json
 import yaml
 from openai import OpenAI
 from tools import discover_tools
+from exceptions import OpenRouterError, ProviderError
 
 
 class OpenRouterAgent:
+    """Agent that uses OpenRouter API for AI-powered task execution.
+    
+    Implements an agentic loop that continues until task completion or
+    max iterations reached. Supports tool usage through OpenAI function calling.
+    
+    Attributes:
+        config (dict): Configuration loaded from YAML
+        client (OpenAI): OpenRouter API client
+        tools (list): OpenAI-formatted tool definitions
+        tool_mapping (dict): Maps tool names to execution functions
+        silent (bool): Whether to suppress debug output
+    """
+    
     def __init__(self, config_path="config.yaml", client=None, silent=False):
+        """Initialize OpenRouter agent.
+        
+        Parameters
+        ----------
+        config_path : str, optional
+            Path to configuration YAML file (default: "config.yaml")
+        client : OpenAI, optional
+            Pre-configured OpenAI client. If None, creates one from config.
+        silent : bool, optional
+            Whether to suppress debug output (default: False)
+            
+        Raises
+        ------
+        OpenRouterError
+            If API initialization fails
+        """
         # Load configuration
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
@@ -33,7 +63,23 @@ class OpenRouterAgent:
         }
 
     def call_llm(self, messages):
-        """Make OpenRouter API call with tools"""
+        """Make OpenRouter API call with tools.
+        
+        Parameters
+        ----------
+        messages : list
+            Conversation history in OpenAI message format
+            
+        Returns
+        -------
+        OpenAI response object
+            Contains choices with message content and tool calls
+            
+        Raises
+        ------
+        OpenRouterError
+            Wraps any API errors with context
+        """
         try:
             response = self.client.chat.completions.create(
                 model=self.config["openrouter"]["model"],
@@ -42,10 +88,26 @@ class OpenRouterAgent:
             )
             return response
         except Exception as e:
-            raise Exception(f"LLM call failed: {str(e)}")
+            # Wrap in our custom exception
+            raise OpenRouterError(message=f"LLM call failed: {str(e)}")
 
     def handle_tool_call(self, tool_call):
-        """Handle a tool call and return the result message"""
+        """Handle a tool call and return the result message.
+        
+        Parameters
+        ----------
+        tool_call : OpenAI tool call object
+            Contains function name and arguments
+            
+        Returns
+        -------
+        dict
+            Tool result message in OpenAI format with:
+            - role: "tool"
+            - tool_call_id: ID from the tool call
+            - name: Tool name
+            - content: JSON-encoded result or error
+        """
         try:
             # Extract tool name and arguments
             tool_name = tool_call.function.name
@@ -73,8 +135,29 @@ class OpenRouterAgent:
                 "content": json.dumps({"error": f"Tool execution failed: {str(e)}"}),
             }
 
-    def run(self, user_input: str):
-        """Run the agent with user input and return FULL conversation content"""
+    def run(self, user_input: str) -> str:
+        """Run the agent with user input and return full conversation content.
+        
+        Implements the agentic loop, continuing until task completion tool
+        is called or max iterations reached.
+        
+        Parameters
+        ----------
+        user_input : str
+            The user's request or prompt
+            
+        Returns
+        -------
+        str
+            Combined content from all assistant messages
+            
+        Examples
+        --------
+        >>> agent = OpenRouterAgent(silent=True)
+        >>> response = agent.run("Search for Python tutorials")
+        >>> print(response)
+        "I found several Python tutorials..."
+        """
         # Initialize messages with system prompt and user input
         messages = [
             {"role": "system", "content": self.config["system_prompt"]},

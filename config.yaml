@@ -70,3 +70,24 @@ orchestrator:
 search:
   max_results: 5
   user_agent: "Mozilla/5.0 (compatible; OpenRouter Agent)"
+
+# Timeout settings (in seconds)
+timeouts:
+  cli_verification: 5
+  progress_update_interval: 5
+  subprocess_timeout: 120
+  tool_execution: 30
+
+# Display and formatting limits
+display:
+  preview_lines: 10
+  preview_display_lines: 5
+  line_truncate_length: 80
+  json_preview_length: 50
+  max_prompt_size: 10000  # Maximum characters for system prompt
+  
+# Performance settings
+performance:
+  cache_tool_discovery: true
+  cache_system_prompts: true
+  lazy_load_tool_examples: false  # Set to true for large tool sets
