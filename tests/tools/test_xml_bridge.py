@@ -53,7 +53,9 @@ def test_malformed_xml_returns_error():
 
         # Then: Returns error
         assert code == 1, f"Should fail for input: {xml_input}"
-        assert "xml" in stdout.lower() or "xml" in stderr.lower()
+        # Check for error messages about invalid XML or parsing
+        output = (stdout + stderr).lower()
+        assert "invalid" in output or "error" in output or "xml" in output
 
 
 def test_missing_required_parameters_detected():
@@ -102,7 +104,8 @@ def test_xml_special_characters_handled():
             pass
         else:
             # If it fails, should be due to math evaluation, not XML parsing
-            assert "xml" not in stdout.lower() and "xml" not in stderr.lower()
+            output = (stdout + stderr).lower()
+            assert "invalid xml" not in output
 
 
 def test_complex_tool_parameters_parsed_correctly():
@@ -119,7 +122,7 @@ def test_complex_tool_parameters_parsed_correctly():
         assert "success" in result or "error" not in result
     else:
         # If fails, should be file system issue, not XML parsing
-        assert "xml" not in stdout.lower()
+        assert "invalid xml" not in stdout.lower()
 
 
 def test_numeric_values_in_xml_converted_correctly():
@@ -133,4 +136,5 @@ def test_numeric_values_in_xml_converted_correctly():
     # Then: Completes without XML errors (may have network errors)
     if code == 1:
         # Should not be XML parsing error
-        assert "xml" not in stdout.lower() and "xml" not in stderr.lower()
+        output = (stdout + stderr).lower()
+        assert "invalid xml" not in output

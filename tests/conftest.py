@@ -29,7 +29,7 @@ def tmp_config(tmp_path):
             "task_timeout": 30,
             "aggregation_strategy": "ai_synthesis",
             "question_generation_prompt": "Generate {num_agents} focused questions for: {user_input}",
-            "synthesis_prompt": "Synthesize these responses: {responses}",
+            "synthesis_prompt": "Synthesize these {num_responses} responses:\n\n{agent_responses}\n\nProvide a single coherent answer.",
         },
         "tools": {"search_web": {"max_results": 3}},
     }

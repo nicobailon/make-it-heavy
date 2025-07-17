@@ -56,20 +56,52 @@ def test_file_operations_create_and_read_files(base_config_dict, tmp_path):
 
 def test_search_tool_returns_results_or_handles_network_error(base_config_dict):
     """Search tool either returns results or gracefully handles network issues."""
-    # Given: Search tool
+    from unittest.mock import patch, MagicMock
+    
+    # Given: Search tool with mocked network calls
     tools = discover_tools(base_config_dict, silent=True)
     search_tool = tools.get("search_web")
 
     if not search_tool:
         pytest.skip("Search tool not available")
 
-    # When: Searching
-    result = search_tool.execute(query="Python programming")
-
-    # Then: Either returns results or error
-    assert "results" in result or "error" in result
-    if "results" in result:
-        assert isinstance(result["results"], list)
+    # Mock DDGS search results
+    mock_search_results = [
+        {
+            'title': 'Python Programming Guide',
+            'href': 'https://example.com/python',
+            'body': 'Learn Python programming basics...'
+        },
+        {
+            'title': 'Advanced Python',
+            'href': 'https://example.com/advanced',
+            'body': 'Advanced Python techniques...'
+        }
+    ]
+    
+    # Mock requests.get response
+    mock_response = MagicMock()
+    mock_response.text = '<html><body><p>Python is a great programming language.</p></body></html>'
+    mock_response.raise_for_status = MagicMock()
+    
+    with patch('tools.search_tool.DDGS') as mock_ddgs_class:
+        with patch('tools.search_tool.requests.get') as mock_requests:
+            # Configure mocks
+            mock_ddgs = MagicMock()
+            mock_ddgs.text.return_value = mock_search_results
+            mock_ddgs_class.return_value = mock_ddgs
+            
+            mock_requests.return_value = mock_response
+            
+            # When: Searching
+            result = search_tool.execute(query="Python programming")
+            
+            # Then: Returns results (not error since we mocked successful response)
+            assert isinstance(result, list)
+            assert len(result) == 2
+            assert result[0]['title'] == 'Python Programming Guide'
+            assert 'content' in result[0]
+            assert 'Python is a great programming language' in result[0]['content']
 
 
 def test_task_complete_tool_marks_completion(base_config_dict):

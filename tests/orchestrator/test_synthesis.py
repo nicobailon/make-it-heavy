@@ -12,131 +12,120 @@ from orchestrator import TaskOrchestrator
 
 def test_synthesizer_combines_multiple_agent_responses(tmp_config, clean_env):
     """Given 2 mock agent answers, synthesizer returns combined paragraph."""
-    # Given: Orchestrator with mock synthesis
-    with patch("orchestrator.OpenAI") as mock_openai:
-        mock_client = MagicMock()
+    # Given: Mock agent factory that returns synthesis response
+    def mock_agent_factory(silent=False, **kwargs):
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "Based on the analysis, 2+2 equals 4 mathematically, and this has been fundamental throughout history."
+        mock_agent.tools = []
+        mock_agent.tool_mapping = {}
+        return mock_agent
 
-        # Mock synthesis response
-        synthesis_response = MagicMock()
-        synthesis_response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="Based on the analysis, 2+2 equals 4 mathematically, and this has been fundamental throughout history."
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = synthesis_response
-        mock_openai.return_value = mock_client
+    orchestrator = TaskOrchestrator(tmp_config, silent=True, agent_factory=mock_agent_factory)
 
-        orchestrator = TaskOrchestrator(tmp_config, silent=True)
+    # When: Aggregating multiple responses
+    agent_results = [
+        {"agent_id": 0, "status": "success", "response": "From a mathematical perspective, 2+2=4.", "execution_time": 1.0},
+        {"agent_id": 1, "status": "success", "response": "Historically, basic arithmetic has been crucial for trade.", "execution_time": 1.0},
+    ]
 
-        # When: Synthesizing multiple responses
-        agent_responses = [
-            "From a mathematical perspective, 2+2=4.",
-            "Historically, basic arithmetic has been crucial for trade.",
-        ]
+    result = orchestrator.aggregate_results(agent_results)
 
-        result = orchestrator.synthesize_responses(agent_responses)
-
-        # Then: Returns combined synthesis
-        assert result is not None
-        assert isinstance(result, str)
-        assert len(result) > 0
+    # Then: Returns combined synthesis
+    assert result is not None
+    assert isinstance(result, str)
+    assert len(result) > 0
 
 
 def test_synthesis_handles_empty_responses_gracefully(tmp_config, clean_env):
     """Synthesizer handles case when all agents fail."""
+    # Mock agent factory not needed for this test
     orchestrator = TaskOrchestrator(tmp_config, silent=True)
 
-    # When: No responses to synthesize
-    result = orchestrator.synthesize_responses([])
+    # When: No successful results to aggregate
+    agent_results = []  # Empty results
+    result = orchestrator.aggregate_results(agent_results)
 
     # Then: Returns meaningful message
     assert result is not None
-    assert "no responses" in result.lower() or "failed" in result.lower()
+    assert "failed" in result.lower() or "all agents" in result.lower()
 
 
 def test_synthesis_preserves_key_information(tmp_config, clean_env):
     """Synthesis preserves important information from agent responses."""
-    # Given: Mock synthesis that includes key facts
-    with patch("orchestrator.OpenAI") as mock_openai:
-        mock_client = MagicMock()
-
-        def create_synthesis_response(**kwargs):
-            messages = kwargs.get("messages", [])
-            # Extract the responses from the prompt
-            user_msg = messages[-1]["content"] if messages else ""
-
-            if "quantum" in user_msg and "classical" in user_msg:
-                content = "Both quantum mechanics and classical physics perspectives are important."
+    # Given: Mock agent factory that synthesizes based on input
+    def mock_agent_factory(silent=False, **kwargs):
+        mock_agent = MagicMock()
+        
+        def synthesis_response(prompt):
+            if "quantum" in prompt and "classical" in prompt:
+                return "Both quantum mechanics and classical physics perspectives are important."
             else:
-                content = "Synthesized response based on agent inputs."
+                return "Synthesized response based on agent inputs."
+        
+        mock_agent.run.side_effect = synthesis_response
+        mock_agent.tools = []
+        mock_agent.tool_mapping = {}
+        return mock_agent
 
-            response = MagicMock()
-            response.choices = [MagicMock(message=MagicMock(content=content))]
-            return response
+    orchestrator = TaskOrchestrator(tmp_config, silent=True, agent_factory=mock_agent_factory)
 
-        mock_client.chat.completions.create.side_effect = create_synthesis_response
-        mock_openai.return_value = mock_client
+    # When: Aggregating responses with key terms
+    agent_results = [
+        {"agent_id": 0, "status": "success", "response": "From quantum mechanics perspective...", "execution_time": 1.0},
+        {"agent_id": 1, "status": "success", "response": "In classical physics...", "execution_time": 1.0},
+    ]
 
-        orchestrator = TaskOrchestrator(tmp_config, silent=True)
+    result = orchestrator.aggregate_results(agent_results)
 
-        # When: Synthesizing responses with key terms
-        responses = ["From quantum mechanics perspective...", "In classical physics..."]
-
-        result = orchestrator.synthesize_responses(responses)
-
-        # Then: Synthesis mentions both perspectives
-        assert "quantum" in result.lower()
-        assert "classical" in result.lower()
+    # Then: Synthesis mentions both perspectives
+    assert "quantum" in result.lower()
+    assert "classical" in result.lower()
 
 
 def test_synthesis_handles_conflicting_responses(tmp_config, clean_env):
     """Synthesizer reconciles conflicting information from agents."""
-    # Given: Conflicting responses
-    with patch("orchestrator.OpenAI") as mock_openai:
-        mock_client = MagicMock()
+    # Given: Mock agent factory for synthesis
+    def mock_agent_factory(silent=False, **kwargs):
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "While there are different perspectives, the consensus is that proper testing is essential."
+        mock_agent.tools = []
+        mock_agent.tool_mapping = {}
+        return mock_agent
 
-        synthesis_response = MagicMock()
-        synthesis_response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="While there are different perspectives, the consensus is that proper testing is essential."
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = synthesis_response
-        mock_openai.return_value = mock_client
+    orchestrator = TaskOrchestrator(tmp_config, silent=True, agent_factory=mock_agent_factory)
 
-        orchestrator = TaskOrchestrator(tmp_config, silent=True)
+    # When: Agents disagree
+    agent_results = [
+        {"agent_id": 0, "status": "success", "response": "Testing is absolutely critical and should be done first.", "execution_time": 1.0},
+        {"agent_id": 1, "status": "success", "response": "Testing can be done after implementation.", "execution_time": 1.0},
+        {"agent_id": 2, "status": "success", "response": "Testing should be continuous throughout.", "execution_time": 1.0},
+    ]
 
-        # When: Agents disagree
-        responses = [
-            "Testing is absolutely critical and should be done first.",
-            "Testing can be done after implementation.",
-            "Testing should be continuous throughout.",
-        ]
+    result = orchestrator.aggregate_results(agent_results)
 
-        result = orchestrator.synthesize_responses(responses)
-
-        # Then: Synthesis acknowledges different views
-        assert "perspectives" in result or "consensus" in result
+    # Then: Synthesis acknowledges different views
+    assert "perspectives" in result or "consensus" in result
 
 
 def test_synthesis_api_failure_returns_fallback(tmp_config, clean_env):
     """When synthesis API fails, returns concatenated responses as fallback."""
-    # Given: API that will fail
-    with patch("orchestrator.OpenAI") as mock_openai:
-        mock_client = MagicMock()
-        mock_client.chat.completions.create.side_effect = Exception("API Error")
-        mock_openai.return_value = mock_client
+    # Given: Mock agent factory that fails during synthesis
+    def mock_agent_factory(silent=False, **kwargs):
+        mock_agent = MagicMock()
+        mock_agent.run.side_effect = Exception("API Error")
+        mock_agent.tools = []
+        mock_agent.tool_mapping = {}
+        return mock_agent
 
-        orchestrator = TaskOrchestrator(tmp_config, silent=True)
+    orchestrator = TaskOrchestrator(tmp_config, silent=True, agent_factory=mock_agent_factory)
 
-        # When: Synthesis fails
-        responses = ["Response 1", "Response 2"]
-        result = orchestrator.synthesize_responses(responses)
+    # When: Synthesis fails
+    agent_results = [
+        {"agent_id": 0, "status": "success", "response": "Response 1", "execution_time": 1.0},
+        {"agent_id": 1, "status": "success", "response": "Response 2", "execution_time": 1.0},
+    ]
+    result = orchestrator.aggregate_results(agent_results)
 
-        # Then: Returns fallback combination
-        assert result is not None
-        assert "Response 1" in result or "Response 2" in result
+    # Then: Returns fallback combination
+    assert result is not None
+    assert "Response 1" in result or "Response 2" in result

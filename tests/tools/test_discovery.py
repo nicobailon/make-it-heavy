@@ -49,7 +49,11 @@ def test_discovered_tools_are_callable(base_config_dict):
             # Tool should be executable without crashing
             try:
                 result = tools[tool_name].execute(**params)
-                assert isinstance(result, dict), f"{tool_name} should return a dict"
+                # search_web returns a list, others return dict
+                if tool_name == "search_web":
+                    assert isinstance(result, list), f"{tool_name} should return a list"
+                else:
+                    assert isinstance(result, dict), f"{tool_name} should return a dict"
             except FileNotFoundError:
                 # Expected for read_file with nonexistent file
                 pass

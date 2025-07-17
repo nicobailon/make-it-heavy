@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 from agent import create_agent
 
 class TaskOrchestrator:
-    def __init__(self, config_path="config.yaml", silent=False):
+    def __init__(self, config_path="config.yaml", silent=False, agent_factory=None):
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -17,6 +17,7 @@ class TaskOrchestrator:
         self.task_timeout = self.config['orchestrator']['task_timeout']
         self.aggregation_strategy = self.config['orchestrator']['aggregation_strategy']
         self.silent = silent
+        self.agent_factory = agent_factory or create_agent
         
         # Track agent progress
         self.agent_progress = {}
@@ -31,7 +32,7 @@ class TaskOrchestrator:
         decompose_start = time.time()
         
         # Create question generation agent
-        question_agent = create_agent(silent=True)
+        question_agent = self.agent_factory(silent=True)
         
         # Get question generation prompt from config
         prompt_template = self.config['orchestrator']['question_generation_prompt']
@@ -92,7 +93,7 @@ class TaskOrchestrator:
             
             # Use simple agent like in main.py
             agent_start = time.time()
-            agent = create_agent(silent=True)
+            agent = self.agent_factory(silent=True)
             
             if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
                 print(f"⏱️  Agent {agent_id + 1} initialized in {time.time() - agent_start:.2f}s")
@@ -155,7 +156,7 @@ class TaskOrchestrator:
             return responses[0]
         
         # Create synthesis agent to combine all responses
-        synthesis_agent = create_agent(silent=True)
+        synthesis_agent = self.agent_factory(silent=True)
         
         # Build agent responses section
         agent_responses_text = ""
