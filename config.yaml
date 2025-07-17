@@ -91,3 +91,96 @@ performance:
   cache_tool_discovery: true
   cache_system_prompts: true
   lazy_load_tool_examples: false  # Set to true for large tool sets
+
+# ============================================================================
+# AGENT AND ORCHESTRATOR CUSTOMIZATION (Optional)
+# ============================================================================
+# The following sections show how to configure individual agents and 
+# orchestrator with different models and prompts. These are optional - 
+# if not specified, all agents will use the global configuration above.
+
+# Agent-specific configurations (optional)
+# Uncomment and modify to use different models/prompts for individual agents
+# agents:
+#   # Configuration for agent 1
+#   agent_1:
+#     provider: "openrouter"  # Override global provider
+#     model: "anthropic/claude-3.5-sonnet"  # Use a different model
+#     system_prompt: |
+#       You are a specialized research agent focused on finding comprehensive 
+#       information and current data. Use all available tools to gather facts.
+#   
+#   # Configuration for agent 2  
+#   agent_2:
+#     # Uses global provider (claude_code) but different model
+#     model: "claude-opus-4-20250514"  # Premium model for complex analysis
+#     system_prompt: |
+#       You are an analysis expert focused on critical evaluation and 
+#       identifying potential issues, risks, or contradictions.
+#   
+#   # Configuration for agent 3
+#   agent_3:
+#     provider: "openrouter"
+#     model: "openai/gpt-4.1-mini"  # Fast model for quick tasks
+#     system_prompt: |
+#       You are focused on practical solutions and actionable recommendations.
+#   
+#   # Configuration for agent 4
+#   agent_4:
+#     model: "claude-sonnet-4-20250514"  # Same as global but custom prompt
+#     system_prompt: |
+#       You are focused on alternative perspectives and creative solutions.
+
+# Orchestrator model customization (optional)
+# Uncomment to use a different model for orchestrator operations
+# orchestrator:
+#   # ... existing orchestrator settings remain ...
+#   
+#   # Optional: Use a different provider/model for orchestrator
+#   provider: "openrouter"  # Override global provider for orchestrator
+#   model: "anthropic/claude-3.5-sonnet"  # High-quality model for synthesis
+#   
+#   # Or use same provider but different model:
+#   # model: "claude-opus-4-20250514"  # Uses global provider
+
+# ============================================================================
+# EXAMPLE CONFIGURATIONS
+# ============================================================================
+
+# Example 1: Mixed providers with specialized agents
+# ---------------------------------------------------
+# provider: "claude_code"
+# 
+# agents:
+#   agent_1:
+#     provider: "openrouter"
+#     model: "anthropic/claude-3.5-sonnet"
+#     api_key: "YOUR_OPENROUTER_KEY"  # Can override API key per agent
+#   agent_2:
+#     model: "claude-opus-4-20250514"  # Claude Code provider
+#   agent_3:
+#     provider: "openrouter" 
+#     model: "google/gemini-2.0-flash-001"
+#   agent_4:
+#     model: "claude-sonnet-4-20250514"  # Claude Code provider
+# 
+# orchestrator:
+#   provider: "openrouter"
+#   model: "openai/gpt-4.1-mini"  # Fast synthesis
+
+# Example 2: All OpenRouter with model specialization
+# ---------------------------------------------------
+# provider: "openrouter"
+# 
+# agents:
+#   agent_1:
+#     model: "anthropic/claude-3.5-sonnet"  # Deep analysis
+#   agent_2:
+#     model: "openai/gpt-4.1-mini"  # Quick responses
+#   agent_3:
+#     model: "meta-llama/llama-3.1-70b"  # Open source option
+#   agent_4:
+#     model: "google/gemini-2.0-flash-001"  # Multimodal capable
+# 
+# orchestrator:
+#   model: "anthropic/claude-3.5-sonnet"  # Best for synthesis

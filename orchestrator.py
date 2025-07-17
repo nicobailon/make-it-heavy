@@ -1,12 +1,12 @@
 import json
-import yaml
 import time
 import threading
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from typing import List, Dict, Any
 from agent import create_agent
-from constants import DEFAULT_MAX_WORKERS, DEFAULT_TASK_TIMEOUT
+from config_utils import get_orchestrator_config, load_config, validate_config
+from constants import DEFAULT_TASK_TIMEOUT
 
 class TaskOrchestrator:
     """Orchestrates multiple agents to analyze tasks from different perspectives.
@@ -15,8 +15,14 @@ class TaskOrchestrator:
     runs multiple agents in parallel to answer them, and synthesizes the
     results into a comprehensive response.
     
+    New Features:
+        - Each agent can have its own model, provider, and system prompt
+        - Orchestrator can use a dedicated model for question generation and synthesis
+        - Thread-safe configuration with caching for performance
+    
     Attributes:
         config (dict): Configuration loaded from YAML
+        orchestrator_config (dict): Orchestrator-specific configuration with model overrides
         num_agents (int): Number of parallel agents to run
         task_timeout (int): Timeout per agent in seconds
         agent_factory (callable): Factory function to create agents
@@ -37,20 +43,71 @@ class TaskOrchestrator:
             Factory function to create agents. If None, uses create_agent.
             Useful for dependency injection in tests.
         """
-        # Load configuration
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+        # Load and validate configuration
+        self.config = load_config(config_path)
+        validate_config(self.config)
         
-        self.num_agents = self.config['orchestrator']['parallel_agents']
-        self.task_timeout = self.config['orchestrator']['task_timeout']
-        self.aggregation_strategy = self.config['orchestrator']['aggregation_strategy']
+        # Get orchestrator-specific configuration
+        self.orchestrator_config = get_orchestrator_config(self.config)
+        
+        # Standard orchestrator settings with safe defaults
+        orch_section = self.config.get('orchestrator', {})
+        self.num_agents = orch_section.get('parallel_agents', 4)
+        self.task_timeout = orch_section.get('task_timeout', DEFAULT_TASK_TIMEOUT)
+        self.aggregation_strategy = orch_section.get('aggregation_strategy', 'consensus')
         self.silent = silent
-        self.agent_factory = agent_factory or create_agent
+        
+        # Enhanced agent factory with configuration support
+        self.agent_factory = agent_factory or self._create_agent_with_config
+        self.config_path = config_path
         
         # Track agent progress
         self.agent_progress = {}
         self.agent_results = {}
         self.progress_lock = threading.Lock()
+    
+    def _create_agent_with_config(self, agent_id=None, silent=True):
+        """Create agent with agent-specific configuration"""
+        return create_agent(
+            config_path=self.config_path,
+            agent_id=agent_id,
+            silent=silent,
+            preloaded_config=self.config
+        )
+    
+    def _create_orchestrator_agent(self, silent=True):
+        """Create agent specifically for orchestrator operations (question generation, synthesis)"""
+        # If a custom agent factory is provided, use it
+        if self.agent_factory != self._create_agent_with_config:
+            return self.agent_factory(silent=silent)
+            
+        # Otherwise, use the standard orchestrator agent creation
+        # Create a temporary agent configuration for orchestrator
+        orchestrator_agent_config = self.orchestrator_config.copy()
+        
+        # Use orchestrator-specific model if configured
+        if 'model' in self.orchestrator_config:
+            orchestrator_agent_config['model'] = self.orchestrator_config['model']
+        
+        if 'provider' in self.orchestrator_config:
+            provider = self.orchestrator_config['provider']
+            if provider == "claude_code":
+                from claude_code_cli_provider import ClaudeCodeCLIAgent
+                return ClaudeCodeCLIAgent(
+                    config_path=self.config_path,
+                    silent=silent,
+                    agent_config=orchestrator_agent_config
+                )
+            else:
+                from agent import OpenRouterAgent
+                return OpenRouterAgent(
+                    config_path=self.config_path,
+                    silent=silent,
+                    agent_config=orchestrator_agent_config
+                )
+        else:
+            # Use default agent creation
+            return create_agent(config_path=self.config_path, silent=silent, preloaded_config=self.config)
     
     def decompose_task(self, user_input: str, num_agents: int) -> List[str]:
         """Use AI to dynamically generate different questions based on user input.
@@ -79,8 +136,8 @@ class TaskOrchestrator:
         
         decompose_start = time.time()
         
-        # Create question generation agent
-        question_agent = self.agent_factory(silent=True)
+        # Create orchestrator-specific agent for question generation
+        question_agent = self._create_orchestrator_agent(silent=True)
         
         # Get question generation prompt from config
         prompt_template = self.config['orchestrator']['question_generation_prompt']
@@ -156,9 +213,10 @@ class TaskOrchestrator:
             if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
                 print(f"\n🚀 Starting Agent {agent_id + 1} with task: {subtask[:50]}...")
             
-            # Use simple agent like in main.py
+            # Create agent with specific ID for configuration lookup
             agent_start = time.time()
-            agent = self.agent_factory(silent=True)
+            agent_config_id = f"agent_{agent_id + 1}"  # agent_1, agent_2, etc.
+            agent = self.agent_factory(agent_id=agent_config_id, silent=True)
             
             if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
                 print(f"⏱️  Agent {agent_id + 1} initialized in {time.time() - agent_start:.2f}s")
@@ -231,8 +289,8 @@ class TaskOrchestrator:
         if len(responses) == 1:
             return responses[0]
         
-        # Create synthesis agent to combine all responses
-        synthesis_agent = self.agent_factory(silent=True)
+        # Create orchestrator-specific agent for synthesis
+        synthesis_agent = self._create_orchestrator_agent(silent=True)
         
         # Build agent responses section
         agent_responses_text = ""

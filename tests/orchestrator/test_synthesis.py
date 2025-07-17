@@ -87,7 +87,8 @@ def test_synthesis_handles_conflicting_responses(tmp_config, clean_env):
     # Given: Mock agent factory for synthesis
     def mock_agent_factory(silent=False, **kwargs):
         mock_agent = MagicMock()
-        mock_agent.run.return_value = "While there are different perspectives, the consensus is that proper testing is essential."
+        # Return synthesis response that includes expected keywords
+        mock_agent.run.return_value = "While there are different perspectives among the agents, the consensus is that proper testing is essential."
         mock_agent.tools = []
         mock_agent.tool_mapping = {}
         return mock_agent

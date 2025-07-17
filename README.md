@@ -120,14 +120,24 @@ graph TD
 - **Agentic Loop**: Continues working until task completion
 - **Tool Integration**: Automatic tool discovery and execution
 - **Configurable**: Uses `config.yaml` for all settings
+- **Per-Agent Customization**: Each agent can have its own model, provider, and prompts
+- **Enhanced Factory**: `create_agent()` now supports agent-specific configurations
 
 #### 2. Orchestrator (`orchestrator.py`)
 - **Dynamic Question Generation**: AI creates specialized questions
 - **Parallel Execution**: Runs multiple agents simultaneously  
 - **Response Synthesis**: AI combines all agent outputs
 - **Error Handling**: Graceful fallbacks and error recovery
+- **Dedicated Model Support**: Orchestrator can use different models for question generation and synthesis
+- **Agent Specialization**: Automatically assigns configurations to each parallel agent
 
-#### 3. Tool System (`tools/`)
+#### 3. Configuration Utilities (`config_utils.py`)
+- **Thread-Safe Caching**: Efficient configuration loading with thread-safe cache
+- **Configuration Inheritance**: Agent configs inherit from global settings
+- **Validation**: Early error detection for missing required fields
+- **Flexible Overrides**: Fine-grained control over each agent's behavior
+
+#### 4. Tool System (`tools/`)
 - **Auto-Discovery**: Automatically loads all tools from directory
 - **Hot-Swappable**: Add new tools by dropping files in `tools/`
 - **Standardized Interface**: All tools inherit from `BaseTool`
@@ -175,6 +185,69 @@ search:
   max_results: 5
   user_agent: "Mozilla/5.0 (compatible; OpenRouter Agent)"
 ```
+
+### 🎨 Agent and Orchestrator Customization (New!)
+
+Make It Heavy now supports individual model and prompt configuration for each agent and the orchestrator. This allows you to:
+- Use different AI models for different agents (e.g., Claude for analysis, GPT-4 for speed)
+- Mix providers (some agents on OpenRouter, others on Claude Code)
+- Customize prompts for specialized agent behaviors
+- Use a dedicated model for orchestrator operations
+
+#### Example: Mixed Providers with Specialized Agents
+
+```yaml
+provider: "claude_code"  # Default provider
+
+# Agent-specific configurations
+agents:
+  agent_1:
+    provider: "openrouter"  # Override provider
+    model: "anthropic/claude-3.5-sonnet"  # Deep analysis model
+    system_prompt: |
+      You are a research specialist focused on finding comprehensive information.
+  
+  agent_2:
+    model: "claude-opus-4-20250514"  # Premium Claude model
+    system_prompt: |
+      You are an analysis expert focused on critical evaluation.
+  
+  agent_3:
+    provider: "openrouter"
+    model: "openai/gpt-4.1-mini"  # Fast model for quick tasks
+  
+  agent_4:
+    model: "claude-sonnet-4-20250514"  # Same provider, custom prompt
+    system_prompt: |
+      You are focused on alternative perspectives and creative solutions.
+
+# Orchestrator model customization
+orchestrator:
+  provider: "openrouter"  # Different provider for orchestrator
+  model: "anthropic/claude-3.5-sonnet"  # High-quality synthesis
+  parallel_agents: 4
+```
+
+#### Example: Model Specialization
+
+```yaml
+provider: "openrouter"
+
+agents:
+  agent_1:
+    model: "anthropic/claude-3.5-sonnet"  # Complex reasoning
+  agent_2:
+    model: "openai/gpt-4.1-mini"  # Speed
+  agent_3:
+    model: "google/gemini-2.0-flash-001"  # Multimodal
+  agent_4:
+    model: "meta-llama/llama-3.1-70b"  # Open source
+
+orchestrator:
+  model: "anthropic/claude-3.5-sonnet"  # Best synthesis
+```
+
+All configurations are optional - agents will use global settings if not specified.
 
 ## 🧪 Testing
 
