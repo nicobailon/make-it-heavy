@@ -77,6 +77,11 @@ class TaskOrchestrator:
     
     def _create_orchestrator_agent(self, silent=True):
         """Create agent specifically for orchestrator operations (question generation, synthesis)"""
+        # If a custom agent factory is provided, use it
+        if self.agent_factory != self._create_agent_with_config:
+            return self.agent_factory(silent=silent)
+            
+        # Otherwise, use the standard orchestrator agent creation
         # Create a temporary agent configuration for orchestrator
         orchestrator_agent_config = self.orchestrator_config.copy()
         
@@ -211,7 +216,7 @@ class TaskOrchestrator:
             # Create agent with specific ID for configuration lookup
             agent_start = time.time()
             agent_config_id = f"agent_{agent_id + 1}"  # agent_1, agent_2, etc.
-            agent = self._create_agent_with_config(agent_id=agent_config_id, silent=True)
+            agent = self.agent_factory(agent_id=agent_config_id, silent=True)
             
             if os.environ.get('TIMING_DEBUG', 'false').lower() == 'true':
                 print(f"⏱️  Agent {agent_id + 1} initialized in {time.time() - agent_start:.2f}s")

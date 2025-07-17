@@ -60,11 +60,22 @@ def test_moderate_payload_handling(tmp_config):
     test_data = "x" * payload_size
     
     # Mock agent that returns the payload
+    call_count = 0
     def mock_agent_factory(silent=False, **kwargs):
+        nonlocal call_count
         agent = MagicMock()
-        agent.run.return_value = test_data
         agent.tools = []
         agent.tool_mapping = {}
+        
+        # First call is for orchestrator, subsequent for actual work
+        if call_count == 0:
+            # Synthesis agent should return the large payload
+            agent.run.return_value = test_data
+        else:
+            # Task agent also returns the payload
+            agent.run.return_value = test_data
+        
+        call_count += 1
         return agent
     
     # When: Running orchestrator with single agent
@@ -155,6 +166,11 @@ def test_timeout_handling_lightweight():
     from concurrent.futures import TimeoutError
     
     config = {
+        'provider': 'openrouter',
+        'openrouter': {
+            'api_key': 'test_key',
+            'model': 'test_model'
+        },
         'orchestrator': {
             'parallel_agents': 1,
             'task_timeout': 0.1,  # Very short timeout

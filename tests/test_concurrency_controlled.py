@@ -17,8 +17,10 @@ def test_limited_parallel_agents(tmp_config):
     """Test with limited number of agents to avoid CPU overload."""
     # Given: Mock agent factory with controlled delay
     execution_times = []
+    call_count = 0
     
     def mock_agent_factory(silent=False, **kwargs):
+        nonlocal call_count
         agent = MagicMock()
         
         def mock_run(prompt):
@@ -26,11 +28,15 @@ def test_limited_parallel_agents(tmp_config):
             # Mock work with minimal delay
             time.sleep(TEST_MOCK_DELAY)
             execution_times.append(time.time() - start)
+            # Synthesis agent needs to return something that includes "Response to:"
+            if call_count == 0:  # First agent is for synthesis
+                return "Combined responses: Response to: various questions"
             return f"Response to: {prompt[:20]}"
         
         agent.run.side_effect = mock_run
         agent.tools = []
         agent.tool_mapping = {}
+        call_count += 1
         return agent
     
     # When: Running with limited agents
@@ -45,7 +51,7 @@ def test_limited_parallel_agents(tmp_config):
         total_time = time.time() - start
     
     # Then: Executes in parallel but controlled
-    # Note: execution_times includes the decomposition agent, so we expect +1
+    # Since decompose_task is mocked, we have 3 parallel agents + 1 synthesis agent
     assert len(execution_times) == TEST_MAX_CONCURRENT_AGENTS + 1
     assert total_time < TEST_MAX_CONCURRENT_AGENTS * TEST_MOCK_DELAY * 1.5  # Some parallelism
     assert "Response to:" in result
