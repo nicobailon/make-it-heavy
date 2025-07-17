@@ -176,6 +176,30 @@ search:
   user_agent: "Mozilla/5.0 (compatible; OpenRouter Agent)"
 ```
 
+## 🧪 Testing
+
+Run the full behavior-focused test-suite locally:
+
+```bash
+uv pip install -r requirements.txt   # ensure all deps
+python run_tests.py                  # executes pytest -n auto
+```
+
+### Coverage
+
+```bash
+python run_tests.py --cov           # HTML & XML reports in ./htmlcov
+```
+
+### Stress & Concurrency
+
+```bash
+pytest tests/stress                 # 20-concurrency benchmark
+```
+
+> The CI pipeline executes the same commands on each commit.  
+> See `.github/workflows/test.yml`.
+
 ## 🔧 Development
 
 ### Adding New Tools

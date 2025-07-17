@@ -4,24 +4,57 @@ import sys
 from orchestrator import TaskOrchestrator
 
 class OrchestratorCLI:
-    def __init__(self):
-        self.orchestrator = TaskOrchestrator()
+    def __init__(self, config_path=None):
+        try:
+            self.orchestrator = TaskOrchestrator(config_path)
+        except Exception as e:
+            print(f"Error initializing orchestrator: {e}")
+            print("Make sure you have:")
+            print("1. Set your API key in config.yaml (OpenRouter) or installed Claude Code CLI")
+            print("2. Installed all dependencies with: pip install -r requirements.txt")
+            sys.exit(1)
         self.start_time = None
         self.running = False
         
-        # Extract model name for display
-        model_full = self.orchestrator.config['openrouter']['model']
-        # Extract model name (e.g., "google/gemini-2.5-flash-preview-05-20" -> "GEMINI-2.5-FLASH")
-        if '/' in model_full:
-            model_name = model_full.split('/')[-1]
-        else:
-            model_name = model_full
+        # Extract model name for display based on provider
+        provider = self.orchestrator.config.get('provider', 'openrouter')
         
-        # Clean up model name for display
-        model_parts = model_name.split('-')
-        # Take first 3 parts for cleaner display (e.g., gemini-2.5-flash)
-        clean_name = '-'.join(model_parts[:3]) if len(model_parts) >= 3 else model_name
-        self.model_display = clean_name.upper() + " HEAVY"
+        if provider == 'claude_code':
+            # For Claude Code, use the model from claude_code config
+            model_full = self.orchestrator.config.get('claude_code', {}).get('model', 'claude')
+            if model_full.startswith('claude-'):
+                # Handle different Claude model formats
+                if 'claude-opus-4' in model_full:
+                    # Claude Opus 4 format: "claude-opus-4-20250514" -> "CLAUDE-OPUS-4"
+                    clean_name = "CLAUDE-OPUS-4"
+                elif 'claude-sonnet-4' in model_full:
+                    # Claude 4 format: "claude-sonnet-4-20250514" -> "CLAUDE-4-SONNET"
+                    clean_name = "CLAUDE-4-SONNET"
+                elif 'claude-3-5-sonnet' in model_full:
+                    # Claude 3.5 format: "claude-3-5-sonnet-20241022" -> "CLAUDE-3.5-SONNET"
+                    clean_name = "CLAUDE-3.5-SONNET"
+                else:
+                    # Generic extraction for other formats
+                    parts = model_full.split('-')
+                    if len(parts) >= 4:
+                        clean_name = f"CLAUDE-{parts[1]}.{parts[2]}-{parts[3].upper()}"
+                    else:
+                        clean_name = model_full.upper()
+            else:
+                clean_name = model_full.upper()
+        else:
+            # Original OpenRouter logic
+            model_full = self.orchestrator.config['openrouter']['model']
+            if '/' in model_full:
+                model_name = model_full.split('/')[-1]
+            else:
+                model_name = model_full
+            
+            model_parts = model_name.split('-')
+            clean_name = '-'.join(model_parts[:3]) if len(model_parts) >= 3 else model_name
+            clean_name = clean_name.upper()
+        
+        self.model_display = clean_name + " HEAVY"
         
     def clear_screen(self):
         """Properly clear the entire screen"""
@@ -145,17 +178,25 @@ class OrchestratorCLI:
         print("-" * 50)
         
         try:
-            orchestrator_config = self.orchestrator.config['openrouter']
-            print(f"Using model: {orchestrator_config['model']}")
-            print("Orchestrator initialized successfully!")
-            print("Note: Make sure to set your OpenRouter API key in config.yaml")
+            provider = self.orchestrator.config.get('provider', 'openrouter')
+            
+            if provider == 'claude_code':
+                claude_config = self.orchestrator.config.get('claude_code', {})
+                model = claude_config.get('model', 'default Claude model')
+                print(f"Using Claude Code provider with model: {model}")
+                print("Orchestrator initialized successfully!")
+            else:
+                orchestrator_config = self.orchestrator.config['openrouter']
+                print(f"Using OpenRouter provider with model: {orchestrator_config['model']}")
+                print("Orchestrator initialized successfully!")
+                print("Note: Make sure to set your OpenRouter API key in config.yaml")
             print("-" * 50)
         except Exception as e:
             print(f"Error initializing orchestrator: {e}")
             print("Make sure you have:")
             print("1. Set your OpenRouter API key in config.yaml")
             print("2. Installed all dependencies with: pip install -r requirements.txt")
-            return
+            sys.exit(1)
         
         while True:
             try:
@@ -181,13 +222,19 @@ class OrchestratorCLI:
             except KeyboardInterrupt:
                 print("\n\nExiting...")
                 break
+            except EOFError:
+                # Handle running in non-interactive mode (e.g., tests)
+                print("\nEOF detected - exiting")
+                break
             except Exception as e:
                 print(f"Error: {e}")
                 print("Please try again or type 'quit' to exit.")
 
 def main():
     """Main entry point for the orchestrator CLI"""
-    cli = OrchestratorCLI()
+    # Get config file from command line or use default
+    config_file = sys.argv[1] if len(sys.argv) > 1 else None
+    cli = OrchestratorCLI(config_file)
     cli.interactive_mode()
 
 if __name__ == "__main__":

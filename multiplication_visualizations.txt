@@ -1,0 +1,272 @@
+# Alternative Ways to Represent and Visualize 15 × 7 = 105
+
+## 1. Array Models
+
+### Basic Array (15 rows × 7 columns)
+```
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○
+```
+Total dots: 15 rows × 7 columns = 105 dots
+
+### Inverse Array (7 rows × 15 columns)
+```
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○ ○
+```
+Total dots: 7 rows × 15 columns = 105 dots
+
+## 2. Area Models
+
+### Decomposition Area Model (15 = 10 + 5)
+```
+┌──────────────────┬────────────┐
+│      10 × 7      │   5 × 7    │
+│        70        │     35     │
+└──────────────────┴────────────┘
+```
+Total area: 70 + 35 = 105
+
+### Decomposition Area Model (7 = 5 + 2)
+```
+┌─────────────────────────────────┐
+│            15 × 5               │
+│              75                 │
+├─────────────────────────────────┤
+│            15 × 2               │
+│              30                 │
+└─────────────────────────────────┘
+```
+Total area: 75 + 30 = 105
+
+### Double Decomposition Area Model
+```
+┌───────────────┬─────────────┐
+│   10 × 5      │   5 × 5     │
+│     50        │     25      │
+├───────────────┼─────────────┤
+│   10 × 2      │   5 × 2     │
+│     20        │     10      │
+└───────────────┴─────────────┘
+```
+Total area: 50 + 25 + 20 + 10 = 105
+
+## 3. Number Line Models
+
+### Repeated Addition on Number Line
+```
+0────15────30────45────60────75────90────105
+  +15   +15   +15   +15   +15   +15   +15
+```
+Seven jumps of 15 units each = 105
+
+### Skip Counting by 7s
+```
+0───7───14───21───28───35───42───49───56───63───70───77───84───91───98───105
+ +7  +7   +7   +7   +7   +7   +7   +7   +7   +7   +7   +7   +7   +7   +7
+```
+Fifteen jumps of 7 units each = 105
+
+## 4. Bar Models/Strip Diagrams
+
+### 15 groups of 7
+```
+┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+│  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │  7  │
+└─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+                                    105
+```
+
+### 7 groups of 15
+```
+┌───────────────┬───────────────┬───────────────┬───────────────┬───────────────┬───────────────┬───────────────┐
+│      15       │      15       │      15       │      15       │      15       │      15       │      15       │
+└───────────────┴───────────────┴───────────────┴───────────────┴───────────────┴───────────────┴───────────────┘
+                                            105
+```
+
+## 5. Lattice Method (Traditional Grid Method)
+
+```
+    1   5
+   ┌───┬───┐
+ 7 │0 7│3 5│
+   │ ◌ │ ◌ │
+   └───┴───┘
+```
+Reading diagonally: 0, (7+3), 5 = 0, 10, 5 = 105
+
+## 6. Base-Ten Block Models
+
+### Using Base-Ten Blocks
+- 1 hundred flat (100)
+- 0 tens rods
+- 5 unit cubes
+Total: 100 + 0 + 5 = 105
+
+### Visual representation:
+```
+█████████████████████  ○ ○ ○ ○ ○
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+█████████████████████  
+  (1 hundred flat)     (5 units)
+```
+
+## 7. Grouping Models
+
+### Groups of 10 and 5
+```
+Group 1: ●●●●●●●●●● (10)     Group 8:  ●●●●●●●●●● (10)
+Group 2: ●●●●●●●●●● (10)     Group 9:  ●●●●●●●●●● (10)
+Group 3: ●●●●●●●●●● (10)     Group 10: ●●●●●●●●●● (10)
+Group 4: ●●●●●●●●●● (10)     Group 11: ●●●●● (5)
+Group 5: ●●●●●●●●●● (10)     
+Group 6: ●●●●●●●●●● (10)     Total: 10 × 10 + 1 × 5 = 105
+Group 7: ●●●●●●●●●● (10)     
+```
+
+## 8. Factorization Trees
+
+### Prime Factorization
+```
+    105
+   /   \
+  3     35
+       /  \
+      5    7
+```
+105 = 3 × 5 × 7
+
+### Alternative factorizations:
+- 105 = 1 × 105
+- 105 = 3 × 35
+- 105 = 5 × 21
+- 105 = 7 × 15
+- 105 = 15 × 7 ← Our original problem
+
+## 9. Set Theory/Venn Diagram Approach
+
+### Cartesian Product
+Set A = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+Set B = {1, 2, 3, 4, 5, 6, 7}
+|A × B| = |A| × |B| = 15 × 7 = 105 ordered pairs
+
+## 10. Geometric Representations
+
+### Rectangle Dimensions
+- A rectangle with length 15 units and width 7 units
+- Area = length × width = 15 × 7 = 105 square units
+
+### Coordinate Grid
+```
+Y
+7 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+6 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+5 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+4 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+3 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+2 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+1 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼
+0 ┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼ X
+  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+```
+Grid shows 105 unit squares
+
+## 11. Real-World Context Models
+
+### Classroom Seating
+- 15 rows of desks
+- 7 desks per row
+- Total desks: 15 × 7 = 105 desks
+
+### Sports Stadium
+- 15 sections
+- 7 seats per section
+- Total seats: 15 × 7 = 105 seats
+
+### Garden Plot
+- 15 rows of plants
+- 7 plants per row
+- Total plants: 15 × 7 = 105 plants
+
+## 12. Pattern Recognition
+
+### Doubling Pattern
+- 15 × 1 = 15
+- 15 × 2 = 30
+- 15 × 4 = 60
+- 15 × 7 = 15 × 4 + 15 × 2 + 15 × 1 = 60 + 30 + 15 = 105
+
+### Breaking into familiar facts
+- 15 × 7 = 15 × (5 + 2) = (15 × 5) + (15 × 2) = 75 + 30 = 105
+- 15 × 7 = (10 + 5) × 7 = (10 × 7) + (5 × 7) = 70 + 35 = 105
+
+## 13. Algebraic Representations
+
+### Using the distributive property
+- 15 × 7 = (10 + 5)(7) = 10(7) + 5(7) = 70 + 35 = 105
+- 15 × 7 = 15(5 + 2) = 15(5) + 15(2) = 75 + 30 = 105
+
+### FOIL-like expansion
+- 15 × 7 = (10 + 5)(5 + 2) = 10×5 + 10×2 + 5×5 + 5×2 = 50 + 20 + 25 + 10 = 105
+
+## 14. Tally Marks and Counting
+
+### Tally groups of 5
+```
+||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||
+||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||
+||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||  ||||
+(21 groups of 5 = 105)
+```
+
+## 15. Fraction/Percentage Models
+
+### As a fraction of larger numbers
+- 105/1 = 105
+- 210/2 = 105
+- 315/3 = 105
+- 1050/10 = 105
+
+### Percentage relationships
+- 105 = 100% of 105
+- 105 = 150% of 70
+- 105 = 75% of 140
+
+## Educational Benefits
+
+These various representations help students:
+1. **Build conceptual understanding** beyond memorized facts
+2. **See connections** between multiplication and other operations
+3. **Develop spatial reasoning** through visual models
+4. **Practice problem-solving** through multiple approaches
+5. **Strengthen number sense** by seeing patterns and relationships
+6. **Transfer learning** to new contexts and larger numbers
+7. **Build confidence** by having multiple strategies available
+
+Each method reinforces that multiplication is fundamentally about **equal groups**, **repeated addition**, or **rectangular areas**, regardless of the specific representation used.

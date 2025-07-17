@@ -1,4 +1,15 @@
-# OpenRouter API settings
+# Provider selection (openrouter or claude_code)
+provider: "claude_code"
+
+# Claude Code settings (when provider is "claude_code")
+claude_code:
+  model: "claude-sonnet-4-20250514"  # Claude Sonnet 4 as default
+  max_turns: 10
+  cli_path: "claude"  # Path to claude CLI (if not in PATH)
+  # system_prompt: |  # Optional, will use general system_prompt if not specified
+  #   You are a helpful research assistant...
+
+# OpenRouter API settings (when provider is "openrouter")
 openrouter:
   api_key: "YOUR KEY"
   base_url: "https://openrouter.ai/api/v1"
@@ -59,3 +70,24 @@ orchestrator:
 search:
   max_results: 5
   user_agent: "Mozilla/5.0 (compatible; OpenRouter Agent)"
+
+# Timeout settings (in seconds)
+timeouts:
+  cli_verification: 5
+  progress_update_interval: 5
+  subprocess_timeout: 120
+  tool_execution: 30
+
+# Display and formatting limits
+display:
+  preview_lines: 10
+  preview_display_lines: 5
+  line_truncate_length: 80
+  json_preview_length: 50
+  max_prompt_size: 10000  # Maximum characters for system prompt
+  
+# Performance settings
+performance:
+  cache_tool_discovery: true
+  cache_system_prompts: true
+  lazy_load_tool_examples: false  # Set to true for large tool sets
