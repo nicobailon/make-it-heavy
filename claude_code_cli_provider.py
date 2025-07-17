@@ -2,10 +2,11 @@ import json
 import subprocess
 import yaml
 import os
-import sys
 import time
-from typing import Dict, Any, List, Optional
+import hashlib
+from typing import Dict, Any, List
 from tools import discover_tools
+from config_utils import get_agent_config
 from constants import (
     DEFAULT_CLI_VERIFICATION_TIMEOUT,
     DEFAULT_PROGRESS_UPDATE_INTERVAL,
@@ -39,8 +40,8 @@ class ClaudeCodeCLIAgent:
         system_prompt (str): Enhanced prompt with tool instructions
     """
     
-    def __init__(self, config_path="config.yaml", silent=False):
-        """Initialize Claude Code CLI agent.
+    def __init__(self, config_path="config.yaml", silent=False, agent_config=None):
+        """Initialize Claude Code CLI agent with optional agent-specific configuration.
         
         Parameters
         ----------
@@ -48,6 +49,8 @@ class ClaudeCodeCLIAgent:
             Path to configuration YAML file (default: "config.yaml")
         silent : bool, optional
             Whether to suppress debug output (default: False)
+        agent_config : dict, optional
+            Pre-loaded agent-specific configuration. If None, uses global config.
             
         Raises
         ------
@@ -61,7 +64,11 @@ class ClaudeCodeCLIAgent:
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
-        # Silent mode for orchestrator (suppresses debug output)
+        if agent_config is None:
+            # Legacy behavior - use global configuration
+            agent_config = get_agent_config(self.config)
+        
+        self.agent_config = agent_config
         self.silent = silent
         self.timing_enabled = os.environ.get('TIMING_DEBUG', 'false').lower() == 'true'
         
@@ -77,14 +84,19 @@ class ClaudeCodeCLIAgent:
         # Add tools attribute for orchestrator compatibility
         self.tools = []  # Claude Code doesn't use OpenAI-style tools
         
-        # Get Claude Code specific config
-        self.claude_config = self.config.get('claude_code', {})
+        # Get Claude Code specific config from agent config
+        # Use agent_config for model, max_turns, cli_path
+        self.claude_config = {
+            'model': self.agent_config.get('model', self.config['claude_code'].get('model', 'claude-3')),
+            'max_turns': self.agent_config.get('max_turns', self.config['claude_code'].get('max_turns', 10)),
+            'cli_path': self.agent_config.get('cli_path', self.config['claude_code'].get('cli_path', 'claude'))
+        }
         
-        # Get max iterations from config
-        self.max_iterations = self.config.get('agent', {}).get('max_iterations', 10)
+        # Get max iterations from agent config
+        self.max_iterations = self.agent_config.get('max_iterations', self.config.get('agent', {}).get('max_iterations', 10))
         
-        # Get base system prompt
-        self.base_system_prompt = self.config.get('system_prompt', '')
+        # Get base system prompt from agent config
+        self.base_system_prompt = self.agent_config.get('system_prompt', self.config.get('system_prompt', ''))
         
         # Build enhanced system prompt with tool instructions (with caching)
         prompt_start = time.time()
@@ -158,7 +170,7 @@ class ClaudeCodeCLIAgent:
         if self.config.get('performance', {}).get('cache_system_prompts', True):
             # Create cache key based on tools and base prompt
             cache_key = f"{self.base_system_prompt}_{sorted(self.discovered_tools.keys())}"
-            cache_hash = str(hash(cache_key))
+            cache_hash = hashlib.sha256(cache_key.encode()).hexdigest()
             
             if cache_hash in _prompt_cache:
                 if not self.silent:

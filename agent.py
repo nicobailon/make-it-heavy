@@ -2,7 +2,8 @@ import json
 import yaml
 from openai import OpenAI
 from tools import discover_tools
-from exceptions import OpenRouterError, ProviderError
+from exceptions import OpenRouterError
+from config_utils import get_agent_config
 
 
 class OpenRouterAgent:
@@ -19,8 +20,8 @@ class OpenRouterAgent:
         silent (bool): Whether to suppress debug output
     """
     
-    def __init__(self, config_path="config.yaml", client=None, silent=False):
-        """Initialize OpenRouter agent.
+    def __init__(self, config_path="config.yaml", client=None, silent=False, agent_config=None, config=None):
+        """Initialize OpenRouter agent with optional agent-specific configuration.
         
         Parameters
         ----------
@@ -30,23 +31,34 @@ class OpenRouterAgent:
             Pre-configured OpenAI client. If None, creates one from config.
         silent : bool, optional
             Whether to suppress debug output (default: False)
+        agent_config : dict, optional
+            Pre-loaded agent-specific configuration. If None, uses global config.
+        config : dict, optional
+            Pre-loaded full configuration. If provided, skips YAML loading.
             
         Raises
         ------
         OpenRouterError
             If API initialization fails
         """
-        # Load configuration
-        with open(config_path, "r") as f:
-            self.config = yaml.safe_load(f)
-
-        # Silent mode for orchestrator (suppresses debug output)
+        # Load configuration only if not provided
+        if config is None:
+            with open(config_path, "r") as f:
+                self.config = yaml.safe_load(f)
+        else:
+            self.config = config
+            
+        if agent_config is None:
+            # Legacy behavior - use global configuration
+            agent_config = get_agent_config(self.config)
+        
+        self.agent_config = agent_config
         self.silent = silent
 
-        # Dependency injection
+        # Use agent-specific configuration for client
         self.client = client or OpenAI(
-            base_url=self.config["openrouter"]["base_url"],
-            api_key=self.config["openrouter"]["api_key"],
+            base_url=agent_config.get("base_url", self.config["openrouter"]["base_url"]),
+            api_key=agent_config.get("api_key", self.config["openrouter"]["api_key"]),
         )
 
         # Discover tools dynamically
@@ -82,7 +94,7 @@ class OpenRouterAgent:
         """
         try:
             response = self.client.chat.completions.create(
-                model=self.config["openrouter"]["model"],
+                model=self.agent_config.get("model", self.config["openrouter"]["model"]),
                 messages=messages,
                 tools=self.tools,
             )
@@ -160,7 +172,7 @@ class OpenRouterAgent:
         """
         # Initialize messages with system prompt and user input
         messages = [
-            {"role": "system", "content": self.config["system_prompt"]},
+            {"role": "system", "content": self.agent_config.get("system_prompt", self.config.get("system_prompt", ""))},
             {"role": "user", "content": user_input},
         ]
 
@@ -168,7 +180,7 @@ class OpenRouterAgent:
         full_response_content = []
 
         # Implement agentic loop from OpenRouter docs
-        max_iterations = self.config.get("agent", {}).get("max_iterations", 10)
+        max_iterations = self.agent_config.get("max_iterations", self.config.get("agent", {}).get("max_iterations", 10))
         iteration = 0
 
         while iteration < max_iterations:
@@ -232,19 +244,9 @@ class OpenRouterAgent:
         )
 
 
-def create_agent(config_path="config.yaml", silent=False, client=None):
-    """Factory function to create appropriate agent based on provider config
-
-    Args:
-        config_path: Path to configuration file
-        silent: If True, suppresses debug output
-        client: Optional OpenAI client for dependency injection
-
-    Returns:
-        Agent instance (OpenRouterAgent or ClaudeCodeCLIAgent)
-    """
-    import yaml
-
+# Store original function for backward compatibility
+def _create_agent_original(config_path="config.yaml", silent=False, client=None):
+    """Original factory function - kept for backward compatibility"""
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
@@ -256,3 +258,56 @@ def create_agent(config_path="config.yaml", silent=False, client=None):
         return ClaudeCodeCLIAgent(config_path, silent)
     else:
         return OpenRouterAgent(config_path, client=client, silent=silent)
+
+
+def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=None, preloaded_config=None):
+    """Enhanced factory function with agent-specific configuration support
+
+    Args:
+        config_path: Path to configuration file
+        agent_id: Optional agent identifier for agent-specific config
+        silent: If True, suppresses debug output
+        client: Optional OpenAI client for dependency injection
+        preloaded_config: Optional pre-loaded configuration dict
+
+    Returns:
+        Agent instance configured for specific agent or with global settings
+    """
+    from config_utils import load_config, validate_config, get_agent_config
+    
+    # Load configuration if not provided
+    if preloaded_config is None:
+        config = load_config(config_path)
+        validate_config(config)
+    else:
+        config = preloaded_config
+
+    # Get agent-specific configuration
+    agent_config = get_agent_config(config, agent_id)
+    provider = agent_config['provider']
+
+    if provider == "claude_code":
+        from claude_code_cli_provider import ClaudeCodeCLIAgent
+        return ClaudeCodeCLIAgent(
+            config_path=config_path,
+            silent=silent,
+            agent_config=agent_config
+        )
+    else:
+        return OpenRouterAgent(
+            config_path=config_path,
+            client=client,
+            silent=silent,
+            agent_config=agent_config,
+            config=config
+        )
+
+
+# Backward compatibility wrappers
+def create_agent_legacy(config_path="config.yaml", silent=False, client=None):
+    """Legacy agent creation for backward compatibility"""
+    return create_agent(config_path=config_path, silent=silent, client=client)
+
+
+# Alias for consistency with documentation
+create_agent_original = _create_agent_original
