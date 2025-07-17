@@ -52,6 +52,7 @@ except SystemExit:
         [sys.executable, "-c", test_script],
         capture_output=True,
         text=True,
+        timeout=30,  # Add timeout to prevent hanging
         cwd=os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         ),
@@ -101,6 +102,7 @@ except Exception as e:
         [sys.executable, "-c", test_script],
         capture_output=True,
         text=True,
+        timeout=30,  # Add timeout to prevent hanging
         cwd=os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         ),

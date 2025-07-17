@@ -18,8 +18,12 @@ def main():
     cmd = [sys.executable, "-m", "pytest"]
 
     # Add coverage if requested
-    if "--coverage" in sys.argv:
+    if "--coverage" in sys.argv or "--cov" in sys.argv:
         cmd.extend(["--cov=.", "--cov-report=term-missing"])
+        
+    # Add specific coverage report format if requested
+    if "--cov-report=xml" in sys.argv:
+        cmd.append("--cov-report=xml")
 
     # Add parallel execution if requested
     if "--parallel" in sys.argv:

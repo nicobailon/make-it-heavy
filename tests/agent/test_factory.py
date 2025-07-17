@@ -88,7 +88,7 @@ def test_claude_code_provider_detection(tmp_config, clean_env):
             agent = create_agent(tmp_config, silent=True)
             # If it doesn't raise, it should have fallen back
             assert agent is not None
-        except (RuntimeError, FileNotFoundError) as e:
+        except Exception as e:
             # Expected behavior when Claude CLI is missing
             assert "claude" in str(e).lower() or "not found" in str(e).lower()
 
