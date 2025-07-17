@@ -1,4 +1,3 @@
-import json
 import time
 import threading
 import os
@@ -8,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from agent import create_agent
 from config_utils import get_orchestrator_config, load_config, validate_config
 from constants import DEFAULT_TASK_TIMEOUT
+from json_utils import safe_json_parse, validate_question_list, JSONParseError, extract_json_from_text
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -278,12 +278,40 @@ class TaskOrchestrator:
             # Get AI-generated questions with retry logic
             response = self._generate_questions_with_retry(generation_prompt, question_agent)
             
-            # Parse JSON response
-            questions = json.loads(response.strip())
+            # Parse JSON response with safe parsing and validation
+            try:
+                questions = safe_json_parse(
+                    response,
+                    validator=validate_question_list,
+                    error_context="Question generation"
+                )
+            except JSONParseError as json_error:
+                # Try to extract JSON from potentially malformed response
+                logger.warning(f"Initial JSON parse failed, attempting extraction: {json_error}")
+                extracted = extract_json_from_text(response)
+                if extracted:
+                    questions = safe_json_parse(
+                        extracted,
+                        validator=validate_question_list,
+                        error_context="Question generation (extracted)"
+                    )
+                else:
+                    raise json_error
             
             # Validate we got the right number of questions
             if len(questions) != num_agents:
-                raise ValueError(f"Expected {num_agents} questions, got {len(questions)}")
+                logger.error(f"Expected {num_agents} questions, got {len(questions)}")
+                # Try to handle gracefully by padding or truncating
+                if len(questions) < num_agents:
+                    # Pad with variations of the original query
+                    logger.info("Padding questions to match agent count")
+                    base_question = user_input
+                    while len(questions) < num_agents:
+                        questions.append(f"{base_question} (perspective {len(questions) + 1})")
+                else:
+                    # Truncate to requested number
+                    logger.info("Truncating questions to match agent count")
+                    questions = questions[:num_agents]
             
             if not self.silent:
                 print(f"✅ Generated questions in {time.time() - decompose_start:.1f}s")
@@ -291,6 +319,15 @@ class TaskOrchestrator:
                     print(f"   Agent {i}: {q[:60]}..." if len(q) > 60 else f"   Agent {i}: {q}")
             
             return questions
+            
+        except JSONParseError as e:
+            # Specific handling for JSON errors
+            logger.error(f"Failed to parse question generation response: {e}")
+            if e.raw_data:
+                logger.debug(f"Raw response data: {e.raw_data[:200]}...")
+            
+            # Use contextual fallback questions
+            return self._generate_contextual_fallback_questions(user_input, num_agents, error=e)
             
         except Exception as e:
             # Log the error for debugging
