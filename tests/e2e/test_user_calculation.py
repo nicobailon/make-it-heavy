@@ -135,6 +135,7 @@ def test_tool_execution_through_cli(tmp_config, clean_env):
     # Given: Script that uses tools directly
     test_script = f"""
 import sys
+import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath('{__file__}')))))
 
 # Test tool bridge directly

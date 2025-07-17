@@ -3,7 +3,7 @@ import yaml
 import time
 import threading
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from typing import List, Dict, Any
 from agent import create_agent
 from constants import DEFAULT_MAX_WORKERS, DEFAULT_TASK_TIMEOUT
@@ -321,18 +321,30 @@ class TaskOrchestrator:
             }
             
             # Collect results as they complete
-            for future in as_completed(future_to_agent, timeout=self.task_timeout):
-                try:
-                    result = future.result()
-                    agent_results.append(result)
-                except Exception as e:
-                    agent_id = future_to_agent[future]
-                    agent_results.append({
-                        "agent_id": agent_id,
-                        "status": "timeout",
-                        "response": f"Agent {agent_id + 1} timed out or failed: {str(e)}",
-                        "execution_time": self.task_timeout
-                    })
+            try:
+                for future in as_completed(future_to_agent, timeout=self.task_timeout):
+                    try:
+                        result = future.result()
+                        agent_results.append(result)
+                    except Exception as e:
+                        agent_id = future_to_agent[future]
+                        agent_results.append({
+                            "agent_id": agent_id,
+                            "status": "timeout",
+                            "response": f"Agent {agent_id + 1} timed out or failed: {str(e)}",
+                            "execution_time": self.task_timeout
+                        })
+            except TimeoutError:
+                # Handle agents that didn't complete in time
+                for future, agent_id in future_to_agent.items():
+                    if not future.done():
+                        agent_results.append({
+                            "agent_id": agent_id,
+                            "status": "timeout",
+                            "response": f"Agent {agent_id + 1} timed out",
+                            "execution_time": self.task_timeout
+                        })
+                        future.cancel()
         
         # Sort results by agent_id for consistent output
         agent_results.sort(key=lambda x: x["agent_id"])

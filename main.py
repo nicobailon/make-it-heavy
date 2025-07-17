@@ -1,3 +1,4 @@
+import sys
 from agent import create_agent
 
 def main():
@@ -6,8 +7,11 @@ def main():
     print("Type 'quit', 'exit', or 'bye' to exit")
     print("-" * 50)
     
+    # Get config file from command line or use default
+    config_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    
     try:
-        agent = create_agent()
+        agent = create_agent(config_file)
         print("Agent initialized successfully!")
         
         # Display model info based on provider
@@ -26,7 +30,7 @@ def main():
         print("Make sure you have:")
         print("1. Set your API key in config.yaml (OpenRouter) or installed Claude Code CLI")
         print("2. Installed all dependencies with: pip install -r requirements.txt")
-        return
+        sys.exit(1)
     
     while True:
         try:
@@ -46,6 +50,10 @@ def main():
             
         except KeyboardInterrupt:
             print("\n\nExiting...")
+            break
+        except EOFError:
+            # Handle running in non-interactive mode (e.g., tests)
+            print("\nEOF detected - exiting")
             break
         except Exception as e:
             print(f"Error: {e}")

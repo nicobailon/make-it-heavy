@@ -4,8 +4,15 @@ import sys
 from orchestrator import TaskOrchestrator
 
 class OrchestratorCLI:
-    def __init__(self):
-        self.orchestrator = TaskOrchestrator()
+    def __init__(self, config_path=None):
+        try:
+            self.orchestrator = TaskOrchestrator(config_path)
+        except Exception as e:
+            print(f"Error initializing orchestrator: {e}")
+            print("Make sure you have:")
+            print("1. Set your API key in config.yaml (OpenRouter) or installed Claude Code CLI")
+            print("2. Installed all dependencies with: pip install -r requirements.txt")
+            sys.exit(1)
         self.start_time = None
         self.running = False
         
@@ -189,7 +196,7 @@ class OrchestratorCLI:
             print("Make sure you have:")
             print("1. Set your OpenRouter API key in config.yaml")
             print("2. Installed all dependencies with: pip install -r requirements.txt")
-            return
+            sys.exit(1)
         
         while True:
             try:
@@ -215,13 +222,19 @@ class OrchestratorCLI:
             except KeyboardInterrupt:
                 print("\n\nExiting...")
                 break
+            except EOFError:
+                # Handle running in non-interactive mode (e.g., tests)
+                print("\nEOF detected - exiting")
+                break
             except Exception as e:
                 print(f"Error: {e}")
                 print("Please try again or type 'quit' to exit.")
 
 def main():
     """Main entry point for the orchestrator CLI"""
-    cli = OrchestratorCLI()
+    # Get config file from command line or use default
+    config_file = sys.argv[1] if len(sys.argv) > 1 else None
+    cli = OrchestratorCLI(config_file)
     cli.interactive_mode()
 
 if __name__ == "__main__":
