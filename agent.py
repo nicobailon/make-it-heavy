@@ -1,9 +1,132 @@
 import json
 import yaml
+import threading
+import hashlib
+from queue import Queue, Empty
 from openai import OpenAI
 from tools import discover_tools
 from exceptions import OpenRouterError
 from config_utils import get_agent_config
+
+# Cache for Claude Code module import
+_claude_code_module = None
+_claude_code_import_error = None
+
+
+def _get_claude_code_agent_class():
+    """Lazy load and cache ClaudeCodeCLIAgent class
+    
+    Returns:
+        ClaudeCodeCLIAgent: The cached agent class
+        
+    Raises:
+        ImportError: If the module cannot be imported
+    """
+    global _claude_code_module, _claude_code_import_error
+    
+    if _claude_code_module is not None:
+        return _claude_code_module.ClaudeCodeCLIAgent
+    
+    if _claude_code_import_error is not None:
+        raise _claude_code_import_error
+    
+    try:
+        import claude_code_cli_provider
+        _claude_code_module = claude_code_cli_provider
+        return claude_code_cli_provider.ClaudeCodeCLIAgent
+    except ImportError as e:
+        _claude_code_import_error = ImportError(
+            f"Failed to import Claude Code provider: {e}\n"
+            "Ensure claude_code_cli_provider.py is in the correct location."
+        )
+        raise _claude_code_import_error
+
+
+class AgentPool:
+    """Pool for reusing agent instances to improve performance
+    
+    Agents are stored by configuration key to ensure compatibility.
+    The pool has a maximum size to prevent unbounded memory usage.
+    """
+    def __init__(self, max_size: int = 10):
+        """Initialize the agent pool
+        
+        Parameters
+        ----------
+        max_size : int
+            Maximum number of agents to keep in the pool
+        """
+        self.pool = Queue(maxsize=max_size)
+        self.lock = threading.Lock()
+        self.stats = {'hits': 0, 'misses': 0, 'evictions': 0}
+    
+    def get_agent(self, config_key: str, factory_func):
+        """Get agent from pool or create new one
+        
+        Parameters
+        ----------
+        config_key : str
+            Unique key representing the agent configuration
+        factory_func : callable
+            Function to create a new agent if needed
+            
+        Returns
+        -------
+        Agent instance
+        """
+        with self.lock:
+            # Try to get from pool
+            try:
+                while not self.pool.empty():
+                    agent, key = self.pool.get_nowait()
+                    if key == config_key:
+                        self.stats['hits'] += 1
+                        return agent
+                    else:
+                        # Wrong configuration, evict
+                        self.stats['evictions'] += 1
+            except Empty:
+                pass
+            
+            # Create new agent
+            self.stats['misses'] += 1
+            return factory_func()
+    
+    def return_agent(self, agent, config_key: str):
+        """Return agent to pool for reuse
+        
+        Parameters
+        ----------
+        agent : Agent
+            The agent instance to return
+        config_key : str
+            Configuration key for this agent
+        """
+        try:
+            # Clean up agent state if it has a cleanup method
+            if hasattr(agent, 'cleanup'):
+                agent.cleanup()
+            
+            # Try to put in pool
+            self.pool.put((agent, config_key), block=False)
+        except:
+            # Pool is full, let garbage collection handle it
+            pass
+    
+    def get_stats(self):
+        """Get pool statistics
+        
+        Returns
+        -------
+        dict
+            Dictionary with hits, misses, and evictions counts
+        """
+        with self.lock:
+            return self.stats.copy()
+
+
+# Global agent pool
+_agent_pool = AgentPool()
 
 
 class OpenRouterAgent:
@@ -253,15 +376,14 @@ def _create_agent_original(config_path="config.yaml", silent=False, client=None)
     provider = config.get("provider", "openrouter")
 
     if provider == "claude_code":
-        from claude_code_cli_provider import ClaudeCodeCLIAgent
-
+        ClaudeCodeCLIAgent = _get_claude_code_agent_class()
         return ClaudeCodeCLIAgent(config_path, silent)
     else:
         return OpenRouterAgent(config_path, client=client, silent=silent)
 
 
-def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=None, preloaded_config=None):
-    """Enhanced factory function with agent-specific configuration support
+def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=None, preloaded_config=None, use_pool=True):
+    """Enhanced factory function with agent-specific configuration support and pooling
 
     Args:
         config_path: Path to configuration file
@@ -269,6 +391,7 @@ def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=
         silent: If True, suppresses debug output
         client: Optional OpenAI client for dependency injection
         preloaded_config: Optional pre-loaded configuration dict
+        use_pool: If True, uses agent pooling for performance (default: True)
 
     Returns:
         Agent instance configured for specific agent or with global settings
@@ -285,22 +408,33 @@ def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=
     # Get agent-specific configuration
     agent_config = get_agent_config(config, agent_id)
     provider = agent_config['provider']
-
-    if provider == "claude_code":
-        from claude_code_cli_provider import ClaudeCodeCLIAgent
-        return ClaudeCodeCLIAgent(
-            config_path=config_path,
-            silent=silent,
-            agent_config=agent_config
-        )
+    
+    # Generate configuration key for pooling
+    config_key = f"{provider}:{agent_id or 'default'}:{hashlib.md5(json.dumps(agent_config, sort_keys=True).encode()).hexdigest()}"
+    
+    def factory():
+        """Factory function to create new agent"""
+        if provider == "claude_code":
+            ClaudeCodeCLIAgent = _get_claude_code_agent_class()
+            return ClaudeCodeCLIAgent(
+                config_path=config_path,
+                silent=silent,
+                agent_config=agent_config
+            )
+        else:
+            return OpenRouterAgent(
+                config_path=config_path,
+                client=client,
+                silent=silent,
+                agent_config=agent_config,
+                config=config
+            )
+    
+    # Use pool if enabled
+    if use_pool:
+        return _agent_pool.get_agent(config_key, factory)
     else:
-        return OpenRouterAgent(
-            config_path=config_path,
-            client=client,
-            silent=silent,
-            agent_config=agent_config,
-            config=config
-        )
+        return factory()
 
 
 # Backward compatibility wrappers
