@@ -1,12 +1,16 @@
-import json
 import time
 import threading
 import os
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from agent import create_agent
 from config_utils import get_orchestrator_config, load_config, validate_config
 from constants import DEFAULT_TASK_TIMEOUT
+from json_utils import safe_json_parse, validate_question_list, JSONParseError, extract_json_from_text
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class TaskOrchestrator:
     """Orchestrates multiple agents to analyze tasks from different perspectives.
@@ -59,7 +63,7 @@ class TaskOrchestrator:
         
         # Enhanced agent factory with configuration support
         self.agent_factory = agent_factory or self._create_agent_with_config
-        self.config_path = config_path
+        self.config_path = config_path or "config.yaml"
         
         # Track agent progress
         self.agent_progress = {}
@@ -103,11 +107,131 @@ class TaskOrchestrator:
                 return OpenRouterAgent(
                     config_path=self.config_path,
                     silent=silent,
-                    agent_config=orchestrator_agent_config
+                    agent_config=orchestrator_agent_config,
+                    config=self.config
                 )
         else:
             # Use default agent creation
             return create_agent(config_path=self.config_path, silent=silent, preloaded_config=self.config)
+    
+    def _generate_questions_with_retry(self, prompt: str, question_agent, max_attempts: int = 3) -> str:
+        """Generate questions with retry logic and exponential backoff
+        
+        Parameters
+        ----------
+        prompt : str
+            The prompt for question generation
+        question_agent : Agent
+            The agent to use for generation
+        max_attempts : int
+            Maximum number of retry attempts
+            
+        Returns
+        -------
+        str
+            The agent's response
+            
+        Raises
+        ------
+        Exception
+            If all attempts fail
+        """
+        last_error = None
+        wait_time = 1  # Start with 1 second
+        
+        for attempt in range(max_attempts):
+            try:
+                if attempt > 0:
+                    logger.info(f"Question generation retry attempt {attempt + 1}/{max_attempts}")
+                    time.sleep(wait_time)
+                    wait_time *= 2  # Exponential backoff
+                
+                return question_agent.run(prompt)
+                
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Question generation attempt {attempt + 1} failed: {str(e)}")
+        
+        raise last_error
+    
+    def _generate_contextual_fallback_questions(self, user_input: str, num_agents: int, error: Optional[Exception] = None) -> List[str]:
+        """Generate context-aware fallback questions based on error type and user input
+        
+        Parameters
+        ----------
+        user_input : str
+            The original user query
+        num_agents : int
+            Number of questions needed
+        error : Exception, optional
+            The error that occurred during generation
+            
+        Returns
+        -------
+        List[str]
+            Fallback questions tailored to the context
+        """
+        # Log the fallback scenario
+        if error:
+            logger.warning(f"Using contextual fallback questions due to error: {type(error).__name__}")
+        else:
+            logger.info("Using contextual fallback questions")
+        
+        # Analyze user input to determine query type
+        input_lower = user_input.lower()
+        
+        # Technical/programming queries
+        if any(word in input_lower for word in ['code', 'program', 'function', 'debug', 'error', 'implement']):
+            base_questions = [
+                f"Analyze the technical requirements and implementation details for: {user_input}",
+                f"Research best practices and common patterns related to: {user_input}",
+                f"Identify potential issues and debugging strategies for: {user_input}",
+                f"Explore alternative solutions and approaches to: {user_input}"
+            ]
+        # Research/informational queries
+        elif any(word in input_lower for word in ['what', 'how', 'why', 'when', 'who', 'explain']):
+            base_questions = [
+                f"Provide comprehensive background information about: {user_input}",
+                f"Explain the key concepts and principles behind: {user_input}",
+                f"Analyze the implications and applications of: {user_input}",
+                f"Compare different perspectives and viewpoints on: {user_input}"
+            ]
+        # Problem-solving queries
+        elif any(word in input_lower for word in ['solve', 'fix', 'resolve', 'troubleshoot', 'issue']):
+            base_questions = [
+                f"Diagnose the root causes and contributing factors for: {user_input}",
+                f"Propose step-by-step solutions to address: {user_input}",
+                f"Evaluate risks and potential complications when solving: {user_input}",
+                f"Research proven methods and case studies for: {user_input}"
+            ]
+        # Analysis/evaluation queries
+        elif any(word in input_lower for word in ['analyze', 'evaluate', 'compare', 'review', 'assess']):
+            base_questions = [
+                f"Conduct detailed analysis of key aspects regarding: {user_input}",
+                f"Evaluate strengths, weaknesses, and trade-offs for: {user_input}",
+                f"Compare with alternatives and benchmarks related to: {user_input}",
+                f"Provide data-driven insights and metrics about: {user_input}"
+            ]
+        # Default fallback for general queries
+        else:
+            base_questions = [
+                f"Research comprehensive information about: {user_input}",
+                f"Analyze and provide insights about: {user_input}",
+                f"Find alternative perspectives on: {user_input}",
+                f"Verify and cross-check facts about: {user_input}"
+            ]
+        
+        # Extend questions if we need more than 4
+        if num_agents > len(base_questions):
+            additional_questions = [
+                f"Explore future trends and developments related to: {user_input}",
+                f"Identify key stakeholders and their perspectives on: {user_input}",
+                f"Examine historical context and evolution of: {user_input}",
+                f"Assess practical applications and real-world examples of: {user_input}"
+            ]
+            base_questions.extend(additional_questions)
+        
+        return base_questions[:num_agents]
     
     def decompose_task(self, user_input: str, num_agents: int) -> List[str]:
         """Use AI to dynamically generate different questions based on user input.
@@ -151,15 +275,43 @@ class TaskOrchestrator:
         question_agent.tool_mapping = {name: func for name, func in question_agent.tool_mapping.items() if name != 'mark_task_complete'}
         
         try:
-            # Get AI-generated questions
-            response = question_agent.run(generation_prompt)
+            # Get AI-generated questions with retry logic
+            response = self._generate_questions_with_retry(generation_prompt, question_agent)
             
-            # Parse JSON response
-            questions = json.loads(response.strip())
+            # Parse JSON response with safe parsing and validation
+            try:
+                questions = safe_json_parse(
+                    response,
+                    validator=validate_question_list,
+                    error_context="Question generation"
+                )
+            except JSONParseError as json_error:
+                # Try to extract JSON from potentially malformed response
+                logger.warning(f"Initial JSON parse failed, attempting extraction: {json_error}")
+                extracted = extract_json_from_text(response)
+                if extracted:
+                    questions = safe_json_parse(
+                        extracted,
+                        validator=validate_question_list,
+                        error_context="Question generation (extracted)"
+                    )
+                else:
+                    raise json_error
             
             # Validate we got the right number of questions
             if len(questions) != num_agents:
-                raise ValueError(f"Expected {num_agents} questions, got {len(questions)}")
+                logger.error(f"Expected {num_agents} questions, got {len(questions)}")
+                # Try to handle gracefully by padding or truncating
+                if len(questions) < num_agents:
+                    # Pad with variations of the original query
+                    logger.info("Padding questions to match agent count")
+                    base_question = user_input
+                    while len(questions) < num_agents:
+                        questions.append(f"{base_question} (perspective {len(questions) + 1})")
+                else:
+                    # Truncate to requested number
+                    logger.info("Truncating questions to match agent count")
+                    questions = questions[:num_agents]
             
             if not self.silent:
                 print(f"✅ Generated questions in {time.time() - decompose_start:.1f}s")
@@ -168,14 +320,21 @@ class TaskOrchestrator:
             
             return questions
             
-        except (json.JSONDecodeError, ValueError) as e:
-            # Fallback: create simple variations if AI fails
-            return [
-                f"Research comprehensive information about: {user_input}",
-                f"Analyze and provide insights about: {user_input}",
-                f"Find alternative perspectives on: {user_input}",
-                f"Verify and cross-check facts about: {user_input}"
-            ][:num_agents]
+        except JSONParseError as e:
+            # Specific handling for JSON errors
+            logger.error(f"Failed to parse question generation response: {e}")
+            if e.raw_data:
+                logger.debug(f"Raw response data: {e.raw_data[:200]}...")
+            
+            # Use contextual fallback questions
+            return self._generate_contextual_fallback_questions(user_input, num_agents, error=e)
+            
+        except Exception as e:
+            # Log the error for debugging
+            logger.warning(f"Question generation failed after retries: {str(e)}")
+            
+            # Use contextual fallback questions
+            return self._generate_contextual_fallback_questions(user_input, num_agents, error=e)
     
     def update_agent_progress(self, agent_id: int, status: str, result: str = None):
         """Thread-safe progress tracking"""
@@ -252,7 +411,7 @@ class TaskOrchestrator:
                 "execution_time": 0
             }
     
-    def aggregate_results(self, agent_results: List[Dict[str, Any]]) -> str:
+    def aggregate_results(self, agent_results: List[Dict[str, Any]], original_query: str = None) -> str:
         """Combine results from all agents into a comprehensive final answer.
         
         Uses AI synthesis to intelligently combine multiple perspectives into
@@ -262,6 +421,8 @@ class TaskOrchestrator:
         ----------
         agent_results : List[dict]
             Results from all agents, including failed ones
+        original_query : str, optional
+            The original user query for context
             
         Returns
         -------
@@ -277,52 +438,120 @@ class TaskOrchestrator:
         responses = [r["response"] for r in successful_results]
         
         if self.aggregation_strategy == "consensus":
-            return self._aggregate_consensus(responses, successful_results)
+            return self._aggregate_consensus(responses, successful_results, original_query)
         else:
             # Default to consensus
-            return self._aggregate_consensus(responses, successful_results)
+            return self._aggregate_consensus(responses, successful_results, original_query)
     
-    def _aggregate_consensus(self, responses: List[str], _results: List[Dict[str, Any]]) -> str:
+    def _check_synthesis_tools_available(self) -> bool:
+        """Check if synthesis agent has required tools
+        
+        Returns
+        -------
+        bool
+            True if tools are available, False otherwise
         """
-        Use one final AI call to synthesize all agent responses into a coherent answer.
+        try:
+            synthesis_agent = self._create_orchestrator_agent(silent=True)
+            return hasattr(synthesis_agent, 'tools') and len(synthesis_agent.tools) > 0
+        except Exception:
+            return False
+    
+    def _simple_synthesis(self, responses: List[str], original_query: str) -> str:
+        """Simple synthesis without tools - concatenate and summarize
+        
+        Parameters
+        ----------
+        responses : List[str]
+            Agent responses to combine
+        original_query : str
+            The original user query
+            
+        Returns
+        -------
+        str
+            Simple combined response
         """
         if len(responses) == 1:
             return responses[0]
         
-        # Create orchestrator-specific agent for synthesis
-        synthesis_agent = self._create_orchestrator_agent(silent=True)
+        # Build a structured summary
+        summary_parts = [
+            f"Combined analysis for '{original_query}':",
+            "",
+            "=" * 60,
+            ""
+        ]
         
-        # Build agent responses section
-        agent_responses_text = ""
         for i, response in enumerate(responses, 1):
-            agent_responses_text += f"=== AGENT {i} RESPONSE ===\n{response}\n\n"
+            summary_parts.extend([
+                f"**Agent {i} Response:**",
+                response,
+                "",
+                "-" * 40,
+                ""
+            ])
         
-        # Get synthesis prompt from config and format it
-        synthesis_prompt_template = self.config['orchestrator']['synthesis_prompt']
-        synthesis_prompt = synthesis_prompt_template.format(
-            num_responses=len(responses),
-            agent_responses=agent_responses_text
-        )
+        # Add a simple conclusion
+        summary_parts.extend([
+            "=" * 60,
+            "",
+            f"The above responses provide different perspectives on: {original_query}",
+            "Each agent has analyzed the query from its unique angle to provide comprehensive coverage."
+        ])
         
-        # Completely remove all tools from synthesis agent to force direct response
-        synthesis_agent.tools = []
-        synthesis_agent.tool_mapping = {}
+        return "\n".join(summary_parts)
+    
+    def _aggregate_consensus(self, responses: List[str], _results: List[Dict[str, Any]], original_query: str = None) -> str:
+        """
+        Use one final AI call to synthesize all agent responses into a coherent answer.
+        With graceful degradation if tools are unavailable.
+        """
+        if len(responses) == 1:
+            return responses[0]
         
-        # Get the synthesized response
+        # Use provided query or default
+        if not original_query:
+            original_query = "the given query"  # Default fallback
+        
+        # Check if synthesis tools are available
+        if not self._check_synthesis_tools_available():
+            logger.info("Synthesis tools unavailable, using simple synthesis")
+            return self._simple_synthesis(responses, original_query)
+        
         try:
+            # Create orchestrator-specific agent for synthesis
+            synthesis_agent = self._create_orchestrator_agent(silent=True)
+            
+            # Build agent responses section
+            agent_responses_text = ""
+            for i, response in enumerate(responses, 1):
+                agent_responses_text += f"=== AGENT {i} RESPONSE ===\n{response}\n\n"
+            
+            # Get synthesis prompt from config and format it
+            synthesis_prompt_template = self.config['orchestrator']['synthesis_prompt']
+            synthesis_prompt = synthesis_prompt_template.format(
+                num_responses=len(responses),
+                agent_responses=agent_responses_text
+            )
+            
+            # Completely remove all tools from synthesis agent to force direct response
+            synthesis_agent.tools = []
+            synthesis_agent.tool_mapping = {}
+            
+            # Get the synthesized response
             final_answer = synthesis_agent.run(synthesis_prompt)
             return final_answer
+            
         except Exception as e:
             # Log the error for debugging
-            print(f"\n🚨 SYNTHESIS FAILED: {str(e)}")
-            print("📋 Falling back to concatenated responses\n")
-            # Fallback: if synthesis fails, concatenate responses
-            combined = []
-            for i, response in enumerate(responses, 1):
-                combined.append(f"=== Agent {i} Response ===")
-                combined.append(response)
-                combined.append("")
-            return "\n".join(combined)
+            logger.warning(f"Advanced synthesis failed, using simple synthesis: {str(e)}")
+            if not self.silent:
+                print(f"\n🚨 SYNTHESIS FAILED: {str(e)}")
+                print("📋 Falling back to simple synthesis\n")
+            
+            # Use the improved simple synthesis
+            return self._simple_synthesis(responses, original_query)
     
     def get_progress_status(self) -> Dict[int, str]:
         """Get current progress status for all agents"""
@@ -386,22 +615,39 @@ class TaskOrchestrator:
                         agent_results.append(result)
                     except Exception as e:
                         agent_id = future_to_agent[future]
+                        # Preserve full error context for debugging
+                        import traceback
+                        error_details = {
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "traceback": traceback.format_exc()
+                        }
                         agent_results.append({
                             "agent_id": agent_id,
-                            "status": "timeout",
-                            "response": f"Agent {agent_id + 1} timed out or failed: {str(e)}",
-                            "execution_time": self.task_timeout
+                            "status": "error",
+                            "response": f"Agent {agent_id + 1} failed: {str(e)}",
+                            "execution_time": self.task_timeout,
+                            "debug_info": error_details
                         })
+                        logger.error(f"Agent {agent_id} error: {error_details}")
             except TimeoutError:
                 # Handle agents that didn't complete in time
                 for future, agent_id in future_to_agent.items():
                     if not future.done():
+                        # Preserve timeout context
+                        timeout_details = {
+                            "error_type": "TimeoutError",
+                            "timeout_value": self.task_timeout,
+                            "agent_state": self.agent_progress.get(agent_id, "UNKNOWN")
+                        }
                         agent_results.append({
                             "agent_id": agent_id,
                             "status": "timeout",
-                            "response": f"Agent {agent_id + 1} timed out",
-                            "execution_time": self.task_timeout
+                            "response": f"Agent {agent_id + 1} timed out after {self.task_timeout}s",
+                            "execution_time": self.task_timeout,
+                            "debug_info": timeout_details
                         })
+                        logger.warning(f"Agent {agent_id} timeout: {timeout_details}")
                         future.cancel()
         
         # Sort results by agent_id for consistent output
@@ -412,7 +658,7 @@ class TaskOrchestrator:
             print(f"\n🔀 Synthesizing {len(agent_results)} agent responses...")
         
         synthesis_start = time.time()
-        final_result = self.aggregate_results(agent_results)
+        final_result = self.aggregate_results(agent_results, user_input)
         
         total_time = time.time() - orchestrate_start
         if not self.silent:

@@ -6,5 +6,18 @@
       "Bash(uv run pytest:*)"
     ],
     "deny": []
-  }
+  },
+	"hooks": {
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write|MultiEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": ".claude/hooks/type-safety-guard.sh"
+					}
+				]
+			}
+		]
+	}
 }

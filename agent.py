@@ -1,9 +1,254 @@
 import json
 import yaml
+import threading
+import logging
+from collections import OrderedDict
 from openai import OpenAI
 from tools import discover_tools
 from exceptions import OpenRouterError
 from config_utils import get_agent_config
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Cache for Claude Code module import
+_claude_code_module = None
+_claude_code_import_error = None
+
+# Cache for configuration keys to avoid repeated hashing
+_config_key_cache = {}
+_config_key_cache_lock = threading.Lock()
+
+
+def _get_claude_code_agent_class():
+    """Lazy load and cache ClaudeCodeCLIAgent class
+    
+    Returns:
+        ClaudeCodeCLIAgent: The cached agent class
+        
+    Raises:
+        ImportError: If the module cannot be imported
+    """
+    global _claude_code_module, _claude_code_import_error
+    
+    if _claude_code_module is not None:
+        return _claude_code_module.ClaudeCodeCLIAgent
+    
+    if _claude_code_import_error is not None:
+        raise _claude_code_import_error
+    
+    try:
+        import claude_code_cli_provider
+        _claude_code_module = claude_code_cli_provider
+        return claude_code_cli_provider.ClaudeCodeCLIAgent
+    except ImportError as e:
+        _claude_code_import_error = ImportError(
+            f"Failed to import Claude Code provider: {e}\n"
+            "Ensure claude_code_cli_provider.py is in the correct location."
+        )
+        raise _claude_code_import_error
+
+
+class AgentPool:
+    """Pool for reusing agent instances to improve performance
+    
+    Agents are stored by configuration key to ensure compatibility.
+    The pool has a maximum size to prevent unbounded memory usage.
+    Uses OrderedDict for O(1) lookup and LRU eviction.
+    """
+    def __init__(self, max_size: int = 10):
+        """Initialize the agent pool
+        
+        Parameters
+        ----------
+        max_size : int
+            Maximum number of agents to keep in the pool
+        """
+        self.max_size = max_size
+        self.lock = threading.Lock()
+        self.stats = {'hits': 0, 'misses': 0, 'evictions': 0}
+        # Dictionary mapping config_key -> list of agents
+        self.agents_by_config = {}
+        # OrderedDict for LRU eviction order: agent_id -> (config_key, agent)
+        # Using id(agent) as key for O(1) removal
+        self.eviction_order = OrderedDict()
+        self.current_size = 0
+    
+    def get_agent(self, config_key: str, factory_func):
+        """Get agent from pool or create new one
+        
+        Parameters
+        ----------
+        config_key : str
+            Unique key representing the agent configuration
+        factory_func : callable
+            Function to create a new agent if needed
+            
+        Returns
+        -------
+        Agent instance
+        """
+        with self.lock:
+            # O(1) lookup for matching config
+            if config_key in self.agents_by_config and self.agents_by_config[config_key]:
+                # Pop agent from the list
+                agent = self.agents_by_config[config_key].pop()
+                if not self.agents_by_config[config_key]:
+                    # Remove empty list
+                    del self.agents_by_config[config_key]
+                
+                # O(1) removal from eviction order
+                agent_id = id(agent)
+                if agent_id in self.eviction_order:
+                    del self.eviction_order[agent_id]
+                self.current_size -= 1
+                
+                self.stats['hits'] += 1
+                return agent
+            
+            # Create new agent
+            self.stats['misses'] += 1
+            return factory_func()
+    
+    def return_agent(self, agent, config_key: str):
+        """Return agent to pool for reuse
+        
+        Parameters
+        ----------
+        agent : Agent
+            The agent instance to return
+        config_key : str
+            Configuration key for this agent
+        """
+        # Clean up agent state if it has a cleanup method
+        if hasattr(agent, 'cleanup'):
+            try:
+                agent.cleanup()
+            except Exception as e:
+                logger.warning(f"Error during agent cleanup: {e}")
+        
+        try:
+            with self.lock:
+                # Check if pool is full
+                if self.current_size >= self.max_size:
+                    # Evict oldest agent (LRU) - O(1) operation with OrderedDict
+                    if self.eviction_order:
+                        try:
+                            # popitem(last=False) removes the oldest item (FIFO/LRU)
+                            old_agent_id, (old_key, old_agent) = self.eviction_order.popitem(last=False)
+                            
+                            # Remove from agents_by_config
+                            if old_key in self.agents_by_config:
+                                try:
+                                    self.agents_by_config[old_key].remove(old_agent)
+                                    if not self.agents_by_config[old_key]:
+                                        del self.agents_by_config[old_key]
+                                except ValueError:
+                                    # Agent already removed, this is fine
+                                    pass
+                            
+                            self.current_size -= 1
+                            self.stats['evictions'] += 1
+                            
+                            # Try to clean up the evicted agent
+                            if hasattr(old_agent, 'cleanup'):
+                                try:
+                                    old_agent.cleanup()
+                                except Exception as e:
+                                    logger.warning(f"Error cleaning up evicted agent: {e}")
+                        except (KeyError, ValueError) as e:
+                            logger.error(f"Pool consistency error during eviction: {e}")
+                            # Continue anyway to avoid losing the new agent
+                    else:
+                        # Pool full and no agents to evict
+                        logger.warning(
+                            f"Agent pool is full (max_size={self.max_size}). "
+                            f"Agent for config_key={config_key} will be discarded. "
+                            f"Consider increasing pool size if this happens frequently."
+                        )
+                        self.stats['evictions'] += 1
+                        return
+                
+                # Add agent to pool
+                try:
+                    if config_key not in self.agents_by_config:
+                        self.agents_by_config[config_key] = []
+                    self.agents_by_config[config_key].append(agent)
+                    
+                    # Add to eviction order - O(1) operation
+                    agent_id = id(agent)
+                    self.eviction_order[agent_id] = (config_key, agent)
+                    self.current_size += 1
+                except Exception as e:
+                    logger.error(f"Failed to add agent to pool: {e}")
+                    raise
+        except Exception as e:
+            logger.error(f"Critical error in agent pool return operation: {e}")
+            # Even if pool operation fails, we don't want to leak the agent
+            # Let it be garbage collected
+            self.stats['evictions'] += 1
+    
+    def get_stats(self):
+        """Get pool statistics
+        
+        Returns
+        -------
+        dict
+            Dictionary with hits, misses, and evictions counts
+        """
+        with self.lock:
+            return self.stats.copy()
+
+
+# Global agent pool
+_agent_pool = AgentPool()
+
+
+def _get_config_key(provider: str, agent_id: str, agent_config: dict) -> str:
+    """Generate a lightweight configuration key for agent pooling
+    
+    Only includes fields that affect agent behavior, not metadata.
+    Uses caching to avoid repeated hashing.
+    """
+    # Create cache key from provider and agent_id
+    cache_key = f"{provider}:{agent_id or 'default'}"
+    
+    with _config_key_cache_lock:
+        # First check if we have a cached result
+        if cache_key in _config_key_cache:
+            cached_config, cached_hash = _config_key_cache[cache_key]
+            
+            # Extract only essential fields that affect behavior
+            essential_fields = (
+                agent_config.get('model'),
+                agent_config.get('temperature'),
+                agent_config.get('system_prompt'),
+                agent_config.get('max_iterations'),
+                agent_config.get('tools', {}).get('enabled')
+            )
+            
+            if cached_config == essential_fields:
+                return cached_hash
+        
+        # Extract essential fields as tuple (hashable and faster to compare)
+        essential_fields = (
+            agent_config.get('model'),
+            agent_config.get('temperature'),
+            agent_config.get('system_prompt'),
+            agent_config.get('max_iterations'),
+            agent_config.get('tools', {}).get('enabled')
+        )
+        
+        # Use Python's built-in hash() for much faster hashing
+        # Convert to string for consistent hash across runs
+        config_hash = str(abs(hash(essential_fields)))[:8]
+        
+        full_key = f"{provider}:{agent_id or 'default'}:{config_hash}"
+        
+        # Cache the result
+        _config_key_cache[cache_key] = (essential_fields, full_key)
+        
+        return full_key
 
 
 class OpenRouterAgent:
@@ -253,15 +498,14 @@ def _create_agent_original(config_path="config.yaml", silent=False, client=None)
     provider = config.get("provider", "openrouter")
 
     if provider == "claude_code":
-        from claude_code_cli_provider import ClaudeCodeCLIAgent
-
+        ClaudeCodeCLIAgent = _get_claude_code_agent_class()
         return ClaudeCodeCLIAgent(config_path, silent)
     else:
         return OpenRouterAgent(config_path, client=client, silent=silent)
 
 
-def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=None, preloaded_config=None):
-    """Enhanced factory function with agent-specific configuration support
+def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=None, preloaded_config=None, use_pool=True):
+    """Enhanced factory function with agent-specific configuration support and pooling
 
     Args:
         config_path: Path to configuration file
@@ -269,6 +513,7 @@ def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=
         silent: If True, suppresses debug output
         client: Optional OpenAI client for dependency injection
         preloaded_config: Optional pre-loaded configuration dict
+        use_pool: If True, uses agent pooling for performance (default: True)
 
     Returns:
         Agent instance configured for specific agent or with global settings
@@ -285,22 +530,33 @@ def create_agent(config_path="config.yaml", agent_id=None, silent=False, client=
     # Get agent-specific configuration
     agent_config = get_agent_config(config, agent_id)
     provider = agent_config['provider']
-
-    if provider == "claude_code":
-        from claude_code_cli_provider import ClaudeCodeCLIAgent
-        return ClaudeCodeCLIAgent(
-            config_path=config_path,
-            silent=silent,
-            agent_config=agent_config
-        )
+    
+    # Generate configuration key for pooling (optimized)
+    config_key = _get_config_key(provider, agent_id, agent_config)
+    
+    def factory():
+        """Factory function to create new agent"""
+        if provider == "claude_code":
+            ClaudeCodeCLIAgent = _get_claude_code_agent_class()
+            return ClaudeCodeCLIAgent(
+                config_path=config_path,
+                silent=silent,
+                agent_config=agent_config
+            )
+        else:
+            return OpenRouterAgent(
+                config_path=config_path,
+                client=client,
+                silent=silent,
+                agent_config=agent_config,
+                config=config
+            )
+    
+    # Use pool if enabled
+    if use_pool:
+        return _agent_pool.get_agent(config_key, factory)
     else:
-        return OpenRouterAgent(
-            config_path=config_path,
-            client=client,
-            silent=silent,
-            agent_config=agent_config,
-            config=config
-        )
+        return factory()
 
 
 # Backward compatibility wrappers

@@ -173,7 +173,7 @@ def test_timeout_handling_lightweight():
         },
         'orchestrator': {
             'parallel_agents': 1,
-            'task_timeout': 0.1,  # Very short timeout
+            'task_timeout': 1,  # Minimum allowed timeout
             'aggregation_strategy': 'consensus',
             'question_generation_prompt': 'Generate {num_agents} questions for: {user_input}',
             'synthesis_prompt': 'Synthesize these responses: {agent_responses}'
