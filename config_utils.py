@@ -305,7 +305,7 @@ def invalidate_config_cache():
     global _cache_generation
     with _cache_lock:
         _cache_generation += 1
-    _cached_get_agent_config.cache_clear()
+        _cached_get_agent_config.cache_clear()
 
 
 def clear_config_cache():
