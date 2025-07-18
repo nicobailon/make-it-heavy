@@ -124,34 +124,55 @@ class AgentPool:
             except Exception as e:
                 logger.warning(f"Error during agent cleanup: {e}")
         
-        with self.lock:
-            # Check if pool is full
-            if self.current_size >= self.max_size:
-                # Evict oldest agent (LRU)
-                if self.eviction_queue:
-                    old_key, old_agent = self.eviction_queue.pop(0)
-                    if old_key in self.agents_by_config:
-                        self.agents_by_config[old_key].remove(old_agent)
-                        if not self.agents_by_config[old_key]:
-                            del self.agents_by_config[old_key]
-                    self.current_size -= 1
-                    self.stats['evictions'] += 1
-                else:
-                    # Pool full and no agents to evict
-                    logger.warning(
-                        f"Agent pool is full (max_size={self.max_size}). "
-                        f"Agent for config_key={config_key} will be discarded. "
-                        f"Consider increasing pool size if this happens frequently."
-                    )
-                    self.stats['evictions'] += 1
-                    return
-            
-            # Add agent to pool
-            if config_key not in self.agents_by_config:
-                self.agents_by_config[config_key] = []
-            self.agents_by_config[config_key].append(agent)
-            self.eviction_queue.append((config_key, agent))
-            self.current_size += 1
+        try:
+            with self.lock:
+                # Check if pool is full
+                if self.current_size >= self.max_size:
+                    # Evict oldest agent (LRU)
+                    if self.eviction_queue:
+                        try:
+                            old_key, old_agent = self.eviction_queue.pop(0)
+                            if old_key in self.agents_by_config:
+                                self.agents_by_config[old_key].remove(old_agent)
+                                if not self.agents_by_config[old_key]:
+                                    del self.agents_by_config[old_key]
+                            self.current_size -= 1
+                            self.stats['evictions'] += 1
+                            
+                            # Try to clean up the evicted agent
+                            if hasattr(old_agent, 'cleanup'):
+                                try:
+                                    old_agent.cleanup()
+                                except Exception as e:
+                                    logger.warning(f"Error cleaning up evicted agent: {e}")
+                        except (KeyError, ValueError) as e:
+                            logger.error(f"Pool consistency error during eviction: {e}")
+                            # Continue anyway to avoid losing the new agent
+                    else:
+                        # Pool full and no agents to evict
+                        logger.warning(
+                            f"Agent pool is full (max_size={self.max_size}). "
+                            f"Agent for config_key={config_key} will be discarded. "
+                            f"Consider increasing pool size if this happens frequently."
+                        )
+                        self.stats['evictions'] += 1
+                        return
+                
+                # Add agent to pool
+                try:
+                    if config_key not in self.agents_by_config:
+                        self.agents_by_config[config_key] = []
+                    self.agents_by_config[config_key].append(agent)
+                    self.eviction_queue.append((config_key, agent))
+                    self.current_size += 1
+                except Exception as e:
+                    logger.error(f"Failed to add agent to pool: {e}")
+                    raise
+        except Exception as e:
+            logger.error(f"Critical error in agent pool return operation: {e}")
+            # Even if pool operation fails, we don't want to leak the agent
+            # Let it be garbage collected
+            self.stats['evictions'] += 1
     
     def get_stats(self):
         """Get pool statistics
