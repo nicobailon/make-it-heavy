@@ -296,14 +296,15 @@ def validate_config(config: Dict[str, Any]) -> bool:
     # Add numeric bounds checking
     bound_errors = validate_numeric_bounds(config)
     if bound_errors:
-        raise ValueError(f"Configuration bounds errors:\n" + "\n".join(bound_errors))
+        raise ValueError("Configuration bounds errors:\n" + "\n".join(bound_errors))
 
     return True
 
 def invalidate_config_cache():
     """Invalidate all configuration caches"""
     global _cache_generation
-    _cache_generation += 1
+    with _cache_lock:
+        _cache_generation += 1
     _cached_get_agent_config.cache_clear()
 
 

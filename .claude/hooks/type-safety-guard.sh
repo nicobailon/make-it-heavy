@@ -2,11 +2,24 @@
 # Python Type Safety Guard Hook - Detects and blocks Python type safety violations
 # Enforces Python type safety guidelines from python-type-safety.md
 
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "Warning: jq is not installed. Type safety guard hook is disabled." >&2
+    echo "Install jq with: brew install jq (macOS) or apt-get install jq (Linux)" >&2
+    exit 0
+fi
+
 # Read JSON input from stdin
 input=$(cat)
 
-# Extract tool name
-tool_name=$(echo "$input" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+# Validate JSON
+if ! echo "$input" | jq . >/dev/null 2>&1; then
+    echo "Error: Invalid JSON input to type safety guard hook" >&2
+    exit 0
+fi
+
+# Extract tool name using jq
+tool_name=$(echo "$input" | jq -r '.tool_name // empty' 2>/dev/null)
 
 # Only check Edit, Write, MultiEdit
 case "$tool_name" in
@@ -14,24 +27,33 @@ case "$tool_name" in
   *) exit 0 ;;
 esac
 
-# Extract file path
-file_path=$(echo "$input" | grep -o '"path"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+# Extract file path using jq
+file_path=$(echo "$input" | jq -r '.path // empty' 2>/dev/null)
 
 # Only Python files
 if [[ "$file_path" != *.py ]]; then
   exit 0
 fi
 
-# Extract content
+# Extract content based on tool type
 content=""
 case "$tool_name" in
   "Write")
-    content=$(echo "$input" | grep -o '"content"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+    content=$(echo "$input" | jq -r '.content // empty' 2>/dev/null)
     ;;
-  *)
-    content=$(echo "$input" | grep -o '"new_string"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+  "Edit")
+    content=$(echo "$input" | jq -r '.new_string // empty' 2>/dev/null)
+    ;;
+  "MultiEdit")
+    # For MultiEdit, concatenate all new_string values
+    content=$(echo "$input" | jq -r '.edits[]?.new_string // empty' 2>/dev/null | tr '\n' ' ')
     ;;
 esac
+
+# If content extraction failed, exit gracefully
+if [ -z "$content" ]; then
+    exit 0
+fi
 
 # Pattern: Any, object, # type: ignore
 if echo "$content" | grep -qE '\b[Aa]ny\b|:\s*[Aa]ny\b|->\s*[Aa]ny\b|\[\s*[Aa]ny\s*\]|\bobject\b|:\s*object\b|->\s*object\b|#\s*type:\s*ignore'; then

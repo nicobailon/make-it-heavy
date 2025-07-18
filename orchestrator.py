@@ -615,22 +615,39 @@ class TaskOrchestrator:
                         agent_results.append(result)
                     except Exception as e:
                         agent_id = future_to_agent[future]
+                        # Preserve full error context for debugging
+                        import traceback
+                        error_details = {
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                            "traceback": traceback.format_exc()
+                        }
                         agent_results.append({
                             "agent_id": agent_id,
-                            "status": "timeout",
-                            "response": f"Agent {agent_id + 1} timed out or failed: {str(e)}",
-                            "execution_time": self.task_timeout
+                            "status": "error",
+                            "response": f"Agent {agent_id + 1} failed: {str(e)}",
+                            "execution_time": self.task_timeout,
+                            "debug_info": error_details
                         })
+                        logger.error(f"Agent {agent_id} error: {error_details}")
             except TimeoutError:
                 # Handle agents that didn't complete in time
                 for future, agent_id in future_to_agent.items():
                     if not future.done():
+                        # Preserve timeout context
+                        timeout_details = {
+                            "error_type": "TimeoutError",
+                            "timeout_value": self.task_timeout,
+                            "agent_state": self.agent_progress.get(agent_id, "UNKNOWN")
+                        }
                         agent_results.append({
                             "agent_id": agent_id,
                             "status": "timeout",
-                            "response": f"Agent {agent_id + 1} timed out",
-                            "execution_time": self.task_timeout
+                            "response": f"Agent {agent_id + 1} timed out after {self.task_timeout}s",
+                            "execution_time": self.task_timeout,
+                            "debug_info": timeout_details
                         })
+                        logger.warning(f"Agent {agent_id} timeout: {timeout_details}")
                         future.cancel()
         
         # Sort results by agent_id for consistent output
