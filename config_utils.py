@@ -2,7 +2,6 @@ import yaml
 import threading
 import copy
 import json
-from functools import lru_cache
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from collections import ChainMap
@@ -127,20 +126,9 @@ def _merge_provider_config(agent_specific: Dict[str, Any], config: Dict[str, Any
     return agent_specific
 
 
-@lru_cache(maxsize=128)
-def _cached_get_agent_config(config_str: str, agent_id: str, cache_gen: int) -> str:
-    """Internal cached version of get_agent_config that returns JSON string
-    
-    Args:
-        config_str: JSON serialized configuration
-        agent_id: Agent identifier (empty string for None)
-        cache_gen: Cache generation number for invalidation
-        
-    Returns:
-        JSON string of the agent configuration
-    """
-    config = json.loads(config_str)
-    return json.dumps(_compute_agent_config(config, agent_id if agent_id else None))
+# Cache for computed agent configurations
+_agent_config_cache: Dict[str, Dict[str, Any]] = {}
+_cache_max_size = 128
 
 
 def _compute_agent_config(config: Dict[str, Any], agent_id: Optional[str] = None) -> Dict[str, Any]:
@@ -169,6 +157,63 @@ def _compute_agent_config(config: Dict[str, Any], agent_id: Optional[str] = None
     return agent_config
 
 
+def _sanitize_config_for_cache(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize configuration by removing sensitive fields before caching
+    
+    Creates a deep copy and replaces sensitive values with hashes to maintain
+    cache key uniqueness while preventing exposure of sensitive data.
+    """
+    import hashlib
+    from copy import deepcopy
+    
+    sanitized = deepcopy(config)
+    
+    # List of paths to sensitive fields (nested keys separated by '.')
+    sensitive_paths = [
+        'openrouter.api_key',
+        'claude_code.api_key',  # Future-proofing
+        'agents.*.api_key',     # Agent-specific keys
+        'agents.*.openrouter.api_key',
+        'agents.*.claude_code.api_key'
+    ]
+    
+    def _hash_value(value: str) -> str:
+        """Create a deterministic hash of sensitive value"""
+        return f"REDACTED_{hashlib.sha256(value.encode()).hexdigest()[:16]}"
+    
+    def _sanitize_dict(d: Dict[str, Any], path: str = "") -> None:
+        """Recursively sanitize dictionary based on sensitive paths"""
+        for key, value in list(d.items()):
+            current_path = f"{path}.{key}" if path else key
+            
+            # Check if current path matches any sensitive pattern
+            for sensitive_path in sensitive_paths:
+                if _path_matches(current_path, sensitive_path):
+                    if isinstance(value, str):
+                        d[key] = _hash_value(value)
+                    break
+            
+            # Recurse into nested dictionaries
+            if isinstance(value, dict):
+                _sanitize_dict(value, current_path)
+    
+    def _path_matches(path: str, pattern: str) -> bool:
+        """Check if path matches pattern (supports * wildcard)"""
+        pattern_parts = pattern.split('.')
+        path_parts = path.split('.')
+        
+        if len(path_parts) != len(pattern_parts):
+            return False
+            
+        for path_part, pattern_part in zip(path_parts, pattern_parts):
+            if pattern_part != '*' and path_part != pattern_part:
+                return False
+        return True
+    
+    _sanitize_dict(sanitized)
+    return sanitized
+
+
 def get_agent_config(config: Dict[str, Any], agent_id: Optional[str] = None) -> Dict[str, Any]:
     """Get configuration for specific agent with inheritance (with LRU caching)
 
@@ -176,10 +221,29 @@ def get_agent_config(config: Dict[str, Any], agent_id: Optional[str] = None) -> 
     
     This wrapper uses LRU cache for performance optimization.
     """
-    global _cache_generation
-    config_str = json.dumps(config, sort_keys=True)
-    result_str = _cached_get_agent_config(config_str, agent_id or "", _cache_generation)
-    return json.loads(result_str)
+    global _cache_generation, _agent_config_cache
+    
+    # Create cache key from sanitized config to prevent sensitive data exposure
+    sanitized_config = _sanitize_config_for_cache(config)
+    config_str = json.dumps(sanitized_config, sort_keys=True)
+    cache_key = f"{config_str}:{agent_id or ''}:{_cache_generation}"
+    
+    # Check cache with thread safety
+    with _cache_lock:
+        if cache_key in _agent_config_cache:
+            return _agent_config_cache[cache_key].copy()
+        
+        # Compute configuration
+        result = _compute_agent_config(config, agent_id)
+        
+        # Store in cache with size limit
+        if len(_agent_config_cache) >= _cache_max_size:
+            # Remove oldest entry (simple FIFO for now)
+            oldest_key = next(iter(_agent_config_cache))
+            del _agent_config_cache[oldest_key]
+        
+        _agent_config_cache[cache_key] = result
+        return result.copy()
 
 
 def get_orchestrator_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -302,10 +366,10 @@ def validate_config(config: Dict[str, Any]) -> bool:
 
 def invalidate_config_cache():
     """Invalidate all configuration caches"""
-    global _cache_generation
+    global _cache_generation, _agent_config_cache
     with _cache_lock:
         _cache_generation += 1
-        _cached_get_agent_config.cache_clear()
+        _agent_config_cache.clear()
 
 
 def clear_config_cache():

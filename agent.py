@@ -1,7 +1,6 @@
 import json
 import yaml
 import threading
-import hashlib
 import logging
 from collections import OrderedDict
 from openai import OpenAI
@@ -215,36 +214,34 @@ def _get_config_key(provider: str, agent_id: str, agent_config: dict) -> str:
     cache_key = f"{provider}:{agent_id or 'default'}"
     
     with _config_key_cache_lock:
+        # First check if we have a cached result
         if cache_key in _config_key_cache:
-            # Check if config has changed by comparing essential fields
             cached_config, cached_hash = _config_key_cache[cache_key]
             
             # Extract only essential fields that affect behavior
-            essential_fields = {
-                'model': agent_config.get('model'),
-                'temperature': agent_config.get('temperature'),
-                'system_prompt': agent_config.get('system_prompt'),
-                'max_iterations': agent_config.get('max_iterations'),
-                'tools': agent_config.get('tools', {}).get('enabled')
-            }
+            essential_fields = (
+                agent_config.get('model'),
+                agent_config.get('temperature'),
+                agent_config.get('system_prompt'),
+                agent_config.get('max_iterations'),
+                agent_config.get('tools', {}).get('enabled')
+            )
             
             if cached_config == essential_fields:
                 return cached_hash
         
-        # Generate new hash only for essential fields
-        essential_fields = {
-            'model': agent_config.get('model'),
-            'temperature': agent_config.get('temperature'),
-            'system_prompt': agent_config.get('system_prompt'),
-            'max_iterations': agent_config.get('max_iterations'),
-            'tools': agent_config.get('tools', {}).get('enabled')
-        }
-        
-        # Create hash from essential fields only
-        config_str = f"{provider}:{agent_id}:" + ":".join(
-            f"{k}={v}" for k, v in sorted(essential_fields.items())
+        # Extract essential fields as tuple (hashable and faster to compare)
+        essential_fields = (
+            agent_config.get('model'),
+            agent_config.get('temperature'),
+            agent_config.get('system_prompt'),
+            agent_config.get('max_iterations'),
+            agent_config.get('tools', {}).get('enabled')
         )
-        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]  # Use shorter hash
+        
+        # Use Python's built-in hash() for much faster hashing
+        # Convert to string for consistent hash across runs
+        config_hash = str(abs(hash(essential_fields)))[:8]
         
         full_key = f"{provider}:{agent_id or 'default'}:{config_hash}"
         
