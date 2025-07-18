@@ -3,6 +3,7 @@ import yaml
 import threading
 import hashlib
 import logging
+from collections import OrderedDict
 from openai import OpenAI
 from tools import discover_tools
 from exceptions import OpenRouterError
@@ -54,7 +55,7 @@ class AgentPool:
     
     Agents are stored by configuration key to ensure compatibility.
     The pool has a maximum size to prevent unbounded memory usage.
-    Uses a hybrid approach with dictionary for O(1) lookup and queue for LRU eviction.
+    Uses OrderedDict for O(1) lookup and LRU eviction.
     """
     def __init__(self, max_size: int = 10):
         """Initialize the agent pool
@@ -69,8 +70,9 @@ class AgentPool:
         self.stats = {'hits': 0, 'misses': 0, 'evictions': 0}
         # Dictionary mapping config_key -> list of agents
         self.agents_by_config = {}
-        # Queue for LRU eviction order (config_key, agent)
-        self.eviction_queue = []
+        # OrderedDict for LRU eviction order: agent_id -> (config_key, agent)
+        # Using id(agent) as key for O(1) removal
+        self.eviction_order = OrderedDict()
         self.current_size = 0
     
     def get_agent(self, config_key: str, factory_func):
@@ -96,8 +98,10 @@ class AgentPool:
                     # Remove empty list
                     del self.agents_by_config[config_key]
                 
-                # Remove from eviction queue
-                self.eviction_queue = [(k, a) for k, a in self.eviction_queue if a is not agent]
+                # O(1) removal from eviction order
+                agent_id = id(agent)
+                if agent_id in self.eviction_order:
+                    del self.eviction_order[agent_id]
                 self.current_size -= 1
                 
                 self.stats['hits'] += 1
@@ -128,14 +132,22 @@ class AgentPool:
             with self.lock:
                 # Check if pool is full
                 if self.current_size >= self.max_size:
-                    # Evict oldest agent (LRU)
-                    if self.eviction_queue:
+                    # Evict oldest agent (LRU) - O(1) operation with OrderedDict
+                    if self.eviction_order:
                         try:
-                            old_key, old_agent = self.eviction_queue.pop(0)
+                            # popitem(last=False) removes the oldest item (FIFO/LRU)
+                            old_agent_id, (old_key, old_agent) = self.eviction_order.popitem(last=False)
+                            
+                            # Remove from agents_by_config
                             if old_key in self.agents_by_config:
-                                self.agents_by_config[old_key].remove(old_agent)
-                                if not self.agents_by_config[old_key]:
-                                    del self.agents_by_config[old_key]
+                                try:
+                                    self.agents_by_config[old_key].remove(old_agent)
+                                    if not self.agents_by_config[old_key]:
+                                        del self.agents_by_config[old_key]
+                                except ValueError:
+                                    # Agent already removed, this is fine
+                                    pass
+                            
                             self.current_size -= 1
                             self.stats['evictions'] += 1
                             
@@ -163,7 +175,10 @@ class AgentPool:
                     if config_key not in self.agents_by_config:
                         self.agents_by_config[config_key] = []
                     self.agents_by_config[config_key].append(agent)
-                    self.eviction_queue.append((config_key, agent))
+                    
+                    # Add to eviction order - O(1) operation
+                    agent_id = id(agent)
+                    self.eviction_order[agent_id] = (config_key, agent)
                     self.current_size += 1
                 except Exception as e:
                     logger.error(f"Failed to add agent to pool: {e}")
